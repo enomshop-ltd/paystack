@@ -1,6 +1,6 @@
 import { MedusaRequest, MedusaResponse } from "@medusajs/framework/http";
 import { Modules } from "@medusajs/framework/utils";
-import { capturePaymentWorkflow } from "@medusajs/core-flows";
+import { captureOrderPaymentWorkflow } from "@medusajs/core-flows";
 
 export async function POST(req: MedusaRequest, res: MedusaResponse) {
   const { id: order_id } = req.params;
@@ -42,10 +42,9 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
     );
 
     // 3. ✨ Use the core workflow to capture the payment so the Order Module is updated ✨
-    await capturePaymentWorkflow(req.scope).run({
+    await captureOrderPaymentWorkflow(req.scope).run({
       input: {
-        payment_id: authorizedPayment.id,
-        amount: amount,
+        order_id: order_id,
       }
     });
 

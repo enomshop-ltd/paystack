@@ -1,6 +1,6 @@
 {
   "name": "@enomshop/paystack",
-  "version": "1.0.12",
+  "version": "1.0.13",
   "description": "Medusa v2 plugin for Paystack payment provider",
   "author": "Enomshop",
   "license": "MIT",
