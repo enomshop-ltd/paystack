@@ -160,7 +160,6 @@ function PaystackDashboard() {
       }
       setHasMore(json.has_more);
     } catch (err) {
-      console.error("Error fetching Paystack dashboard data:", err);
     } finally {
       setLoading(false);
       setLoadingMore(false);
