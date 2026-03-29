@@ -100,7 +100,7 @@ export async function GET(req: MedusaRequest, res: MedusaResponse) {
       const customerName = tx.customer?.first_name 
         ? `${tx.customer.first_name} ${tx.customer.last_name || ""}`.trim() 
         : "Guest";
-      const orderNumber = tx.metadata?.order_id || tx.reference;
+      const orderNumber = tx.metadata?.order_id || tx.metadata?.cart_id || tx.reference;
 
       let uiStatus = "pending";
       if (tx.status === "success") uiStatus = "captured";

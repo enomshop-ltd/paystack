@@ -87,13 +87,7 @@ class PaystackPaymentProcessor extends AbstractPaymentProvider<PaystackPaymentPr
       );
     }
     const { data, amount, currency_code } = initiatePaymentData;
-    const { email, session_id, order_id, callback_url, ...customMetadata } = (data ?? {}) as {
-      email?: string;
-      session_id?: string;
-      order_id?: string;
-      callback_url?: string;
-      [key: string]: any;
-    };
+    const { email, session_id, order_id, cart_id, callback_url, ...customMetadata } = (data ?? {}) as any;
 
     const validatedCurrencyCode = formatCurrencyCode(currency_code);
     const SUPPORTED_CURRENCIES = ["NGN", "GHS", "ZAR", "USD", "KES", "EGP", "RWF"];
@@ -130,6 +124,7 @@ class PaystackPaymentProcessor extends AbstractPaymentProvider<PaystackPaymentPr
         metadata: {
           session_id,
           order_id,
+          cart_id,
           ...customMetadata,
         },
       });
@@ -518,17 +513,25 @@ class PaystackPaymentProcessor extends AbstractPaymentProvider<PaystackPaymentPr
     }
 
     const sessionId = data.metadata?.session_id;
+    const cartId = data.metadata?.cart_id;
+    const orderId = data.metadata?.order_id;
 
-    if (!sessionId) {
-      if (this.debug) {
-        this.logger.error(
-          "PS_P_Debug: No sessionId found in webhook transaction metadata",
-        );
-      }
-      return {
-        action: PaymentActions.NOT_SUPPORTED,
-      };
+    if (!sessionId && !cartId && !orderId) {
+        if (this.debug) {
+            this.logger.error("PS_P_Debug: No Medusa reference found in webhook metadata");
+        }
+        return { action: PaymentActions.NOT_SUPPORTED };
     }
+
+    return {
+        action: PaymentActions.SUCCESSFUL,
+        data: {
+            session_id: sessionId,
+            cart_id: cartId,
+            order_id: orderId,
+            amount: Number(data.amount), // See Point 2 below regarding amounts
+        },
+    };
 
     if (this.debug) {
       this.logger.info(

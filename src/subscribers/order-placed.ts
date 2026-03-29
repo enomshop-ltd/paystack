@@ -1,6 +1,6 @@
 import { type SubscriberConfig, type SubscriberArgs } from "@medusajs/framework";
 import { Modules } from "@medusajs/framework/utils";
-import { createOrderFulfillmentWorkflow } from "@medusajs/core-flows";
+import { createOrderFulfillmentWorkflow, capturePaymentWorkflow } from "@medusajs/core-flows";
 
 export default async function PaystackOrderPlacedHandler({
   event: { data },
@@ -41,17 +41,20 @@ export default async function PaystackOrderPlacedHandler({
       isPaystackPayment = true;
       capturedAmount = Number(payment.amount);
 
-      // Auto-capture if it hasn't been captured yet
       if (!payment.captured_at) {
         try {
-          await paymentModuleService.capturePayment({
-            payment_id: payment.id,
-            amount: payment.amount,
+          // 2. Replace paymentModuleService.capturePayment with the Workflow
+          await capturePaymentWorkflow(container).run({
+            input: {
+              payment_id: payment.id,
+              amount: payment.amount,
+            }
           });
+          
           logger.info(`[Paystack] Successfully auto-captured payment for Order ${orderId}`);
         } catch (err) {
           logger.error(`[Paystack] Failed to auto-capture payment ${payment.id}:`, err);
-          return; // Stop if capture fails
+          return;
         }
       }
     }

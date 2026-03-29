@@ -1,6 +1,7 @@
 import { MedusaContainer } from "@medusajs/framework/types";
 import { Modules } from "@medusajs/framework/utils";
 import Paystack from "../lib/paystack";
+import { capturePaymentWorkflow } from "@medusajs/core-flows";
 
 // Helper to prevent hitting Paystack rate limits
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -50,9 +51,11 @@ export default async function syncPaystackPayments(container: MedusaContainer) {
           logger.info(`Capturing payment ${payment.id} from Paystack sync`);
           
           // 4. Capture the payment in Medusa
-          await paymentModuleService.capturePayment({
-            payment_id: payment.id,
-            amount: payment.amount,
+          await capturePaymentWorkflow(container).run({
+            input: {
+              payment_id: payment.id,
+              amount: payment.amount,
+            }
           });
         } else if (status && (data.status === "failed" || data.status === "abandoned")) {
           logger.info(`Canceling failed/abandoned payment ${payment.id} from Paystack sync`);
