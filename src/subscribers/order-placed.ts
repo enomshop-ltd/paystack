@@ -1,6 +1,6 @@
 import { type SubscriberConfig, type SubscriberArgs } from "@medusajs/framework";
 import { Modules } from "@medusajs/framework/utils";
-import { createOrderFulfillmentWorkflow, captureOrderPaymentWorkflow } from "@medusajs/core-flows";
+import { createOrderFulfillmentWorkflow, capturePaymentWorkflow } from "@medusajs/core-flows";
 
 export default async function PaystackOrderPlacedHandler({
   event: { data },
@@ -9,10 +9,8 @@ export default async function PaystackOrderPlacedHandler({
   const orderId = data.id;
   
   const query = container.resolve("query");
-  const paymentModuleService = container.resolve(Modules.PAYMENT);
   const logger = container.resolve("logger");
   
-  // 1. Fetch Order with connected payments and items using Query
   const { data: orders } = await query.graph({
     entity: "order",
     fields:[
@@ -27,26 +25,24 @@ export default async function PaystackOrderPlacedHandler({
   });
 
   const order = orders[0];
-  if (!order) return;
-
-  const pc = order.payment_collections?.[0];
-  if (!pc) return;
+  if (!order || !order.payment_collections?.[0]) return;
   
-  // 2. Process the Payments
   let isPaystackPayment = false;
   let capturedAmount = 0;
 
-  for (const payment of pc.payments ||[]) {
+  for (const payment of order.payment_collections[0].payments ||[]) {
     if (payment.provider_id === "paystack" || payment.provider_id === "pp_paystack") {
       isPaystackPayment = true;
       capturedAmount = Number(payment.amount);
 
       if (!payment.captured_at) {
         try {
-          // 2. Replace paymentModuleService.capturePayment with the Workflow
-          await captureOrderPaymentWorkflow(container).run({
+          // 2. Pass the PAYMENT ID, not the Order ID.
+          // This creates the Order Transaction in the isolated Order Module automatically.
+          await capturePaymentWorkflow(container).run({
             input: {
-              order_id: orderId,
+              payment_id: payment.id,
+              captured_by: "system" // Optional: tags who captured it
             }
           });
           
