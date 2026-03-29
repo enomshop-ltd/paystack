@@ -47,7 +47,6 @@ export default async function PaystackOrderPlacedHandler({
           await capturePaymentWorkflow(container).run({
             input: {
               payment_id: payment.id,
-              amount: Number(payment.amount),
             }
           });
           

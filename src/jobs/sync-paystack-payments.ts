@@ -54,7 +54,6 @@ export default async function syncPaystackPayments(container: MedusaContainer) {
           await capturePaymentWorkflow(container).run({
             input: {
               payment_id: payment.id,
-              amount: Number(payment.amount),
             }
           });
         } else if (status && (data.status === "failed" || data.status === "abandoned")) {
