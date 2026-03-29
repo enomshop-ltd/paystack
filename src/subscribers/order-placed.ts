@@ -2,7 +2,7 @@ import { type SubscriberConfig, type SubscriberArgs } from "@medusajs/framework"
 import { Modules } from "@medusajs/framework/utils";
 import { createOrderFulfillmentWorkflow } from "@medusajs/core-flows";
 
-export default async function orderPlacedHandler({
+export default async function PaystackOrderPlacedHandler({
   event: { data },
   container,
 }: SubscriberArgs<{ id: string }>) {
