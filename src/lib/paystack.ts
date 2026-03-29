@@ -1,5 +1,6 @@
 import axios, { AxiosInstance, AxiosRequestConfig } from "axios";
 import axiosRetry from "axios-retry";
+import { Logger } from "@medusajs/framework/types";
 
 export const PAYSTACK_API_PATH = "https://api.paystack.co";
 
@@ -34,15 +35,26 @@ export interface PaystackTransactionAuthorisation {
 
 export interface PaystackWrapperOptions {
   disable_retries?: boolean;
+  logger?: Logger;
+  debug?: boolean;
 }
 
 export default class Paystack {
   apiKey: string;
+  logger?: Logger;
+  debug: boolean;
 
   protected readonly axiosInstance: AxiosInstance;
 
   constructor(apiKey: string, options?: PaystackWrapperOptions) {
     this.apiKey = apiKey;
+    this.logger = options?.logger;
+    this.debug = options?.debug ?? false;
+    
+    if (this.debug && this.logger) {
+      this.logger.info(`[Paystack SDK] Initializing Paystack SDK wrapper. Retries disabled: ${options?.disable_retries}`);
+    }
+
     this.axiosInstance = axios.create({
       baseURL: PAYSTACK_API_PATH,
       headers: {
@@ -70,16 +82,33 @@ export default class Paystack {
       data: request.body,
     } satisfies AxiosRequestConfig;
 
+    if (this.debug && this.logger) {
+      this.logger.info(`[Paystack SDK] Making API request: ${request.method} ${request.path}`);
+      if (request.query) this.logger.info(`[Paystack SDK] Query: ${JSON.stringify(request.query)}`);
+      if (request.body) this.logger.info(`[Paystack SDK] Body: ${JSON.stringify(request.body)}`);
+    }
+
     try {
       const res = await this.axiosInstance(options);
+      
+      if (this.debug && this.logger) {
+        this.logger.info(`[Paystack SDK] API request successful: ${request.method} ${request.path}`);
+      }
+      
       return res.data;
     } catch (error) {
       if (axios.isAxiosError(error)) {
-        throw new Error(
-          `Error from Paystack API with status code ${error.response?.status}: ${error.response?.data?.message}`,
-        );
+        const axiosError = error as any;
+        const errorMessage = `Error from Paystack API with status code ${axiosError.response?.status}: ${axiosError.response?.data?.message}`;
+        if (this.logger) {
+          this.logger.error(`[Paystack SDK] ${errorMessage}`, axiosError.response?.data);
+        }
+        throw new Error(errorMessage);
       }
 
+      if (this.logger) {
+        this.logger.error(`[Paystack SDK] Unexpected error during API request: ${request.method} ${request.path}`, error);
+      }
       throw error;
     }
   }

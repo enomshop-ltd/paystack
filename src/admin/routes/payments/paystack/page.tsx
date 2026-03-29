@@ -48,7 +48,7 @@ export default function PaystackDashboard() {
       }
       setHasMore(json.has_more);
     } catch (err) {
-      console.error("Error fetching Paystack dashboard data:", err);
+      // Silently handle error in UI or show a toast if available
     } finally {
       setLoading(false);
       setLoadingMore(false);

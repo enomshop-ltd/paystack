@@ -7,97 +7,117 @@ export default async function PaystackOrderPlacedHandler({
   container,
 }: SubscriberArgs<{ id: string }>) {
   const orderId = data.id;
-  
   const query = container.resolve("query");
   const logger = container.resolve("logger");
   
-  const { data: orders } = await query.graph({
-    entity: "order",
-    fields:[
-      "id",
-      "email",
-      "currency_code",
-      "total",
-      "items.*",
-      "payment_collections.payments.*"
-    ],
-    filters: { id: orderId }
-  });
+  logger.info(`[Paystack] Order placed handler triggered for order: ${orderId}`);
 
-  const order = orders[0];
-  if (!order || !order.payment_collections?.[0]) return;
-  
-  let isPaystackPayment = false;
-  let capturedAmount = 0;
+  try {
+    logger.info(`[Paystack] Fetching order details for order: ${orderId}`);
+    const { data: orders } = await query.graph({
+      entity: "order",
+      fields:[
+        "id",
+        "email",
+        "currency_code",
+        "total",
+        "items.*",
+        "payment_collections.payments.*"
+      ],
+      filters: { id: orderId }
+    });
 
-  for (const payment of order.payment_collections[0].payments ||[]) {
-    if (payment.provider_id === "paystack" || payment.provider_id === "pp_paystack") {
-      isPaystackPayment = true;
-      capturedAmount = Number(payment.amount);
+    const order = orders[0];
+    if (!order) {
+      logger.warn(`[Paystack] Order not found for id: ${orderId}`);
+      return;
+    }
+    if (!order.payment_collections?.[0]) {
+      logger.warn(`[Paystack] No payment collections found for order: ${orderId}`);
+      return;
+    }
+    
+    let isPaystackPayment = false;
+    let capturedAmount = 0;
 
-      if (!payment.captured_at) {
-        try {
-          // 2. Pass the PAYMENT ID, not the Order ID.
-          // This creates the Order Transaction in the isolated Order Module automatically.
-          await capturePaymentWorkflow(container).run({
-            input: {
-              payment_id: payment.id,
-            }
-          });
-          
-          logger.info(`[Paystack] Successfully auto-captured payment for Order ${orderId}`);
-        } catch (err) {
-          logger.error(`[Paystack] Failed to auto-capture payment ${payment.id}:`, err);
-          return;
+    logger.info(`[Paystack] Checking payments for order: ${orderId}`);
+    for (const payment of order.payment_collections[0].payments ||[]) {
+      if (payment.provider_id === "paystack" || payment.provider_id === "pp_paystack") {
+        isPaystackPayment = true;
+        capturedAmount = Number(payment.amount);
+        logger.info(`[Paystack] Found Paystack payment: ${payment.id} with amount: ${capturedAmount}`);
+
+        if (!payment.captured_at) {
+          logger.info(`[Paystack] Payment ${payment.id} not yet captured. Initiating capture workflow.`);
+          try {
+            await capturePaymentWorkflow(container).run({
+              input: {
+                payment_id: payment.id,
+              }
+            });
+            logger.info(`[Paystack] Successfully auto-captured payment ${payment.id} for Order ${orderId}`);
+          } catch (err) {
+            logger.error(`[Paystack] Failed to auto-capture payment ${payment.id}:`, err);
+            return;
+          }
+        } else {
+          logger.info(`[Paystack] Payment ${payment.id} is already captured.`);
         }
       }
     }
-  }
 
-  // Only proceed with fulfillment and email if this was a Paystack order
-  if (!isPaystackPayment) return;
-
-  // 3. Verifying Amount
-  if (capturedAmount !== Number(order.total)) {
-    logger.warn(`[Paystack] Amount mismatch for Order ${orderId}. Total: ${order.total}, Captured: ${capturedAmount}`);
-    // You might want to flag the order here for manual review
-  }
-
-  // 4. Trigger Automatic Fulfillment
-  try {
-    await createOrderFulfillmentWorkflow(container).run({
-      input: {
-        order_id: order.id,
-        items: order.items.map((i: any) => ({
-          id: i.id,
-          quantity: i.quantity,
-        })),
-      },
-      throwOnError: false,
-    });
-    logger.info(`[Paystack] Auto-fulfilled Order ${orderId}`);
-  } catch (err) {
-    logger.error(`[Paystack] Failed to auto-fulfill Order ${orderId}`, err);
-  }
-
-  // 5. Send Payment Confirmation Email
-  const notificationModule = container.resolve(Modules.NOTIFICATION);
-  if (notificationModule) {
-    try {
-      await notificationModule.createNotifications([{
-        to: order.email,
-        channel: "email",
-        template: "paystack-payment-success",
-        data: {
-          order_id: order.id,
-          amount: capturedAmount,
-          currency: order.currency_code,
-        }
-      }]);
-      logger.info(`[Paystack] Payment confirmation email sent to ${order.email}`);
-    } catch (err) {
-      logger.error(`[Paystack] Failed to send email for Order ${orderId}`, err);
+    if (!isPaystackPayment) {
+      logger.info(`[Paystack] Order ${orderId} does not use Paystack. Skipping Paystack specific logic.`);
+      return;
     }
+
+    if (capturedAmount !== Number(order.total)) {
+      logger.warn(`[Paystack] Amount mismatch for Order ${orderId}. Total: ${order.total}, Captured: ${capturedAmount}`);
+    } else {
+      logger.info(`[Paystack] Amount verified for Order ${orderId}. Total matches captured amount: ${capturedAmount}`);
+    }
+
+    logger.info(`[Paystack] Initiating auto-fulfillment for Order ${orderId}`);
+    try {
+      await createOrderFulfillmentWorkflow(container).run({
+        input: {
+          order_id: order.id,
+          items: order.items.map((i: any) => ({
+            id: i.id,
+            quantity: i.quantity,
+          })),
+        },
+        throwOnError: false,
+      });
+      logger.info(`[Paystack] Successfully auto-fulfilled Order ${orderId}`);
+    } catch (err) {
+      logger.error(`[Paystack] Failed to auto-fulfill Order ${orderId}`, err);
+    }
+
+    logger.info(`[Paystack] Checking for notification module to send confirmation email for Order ${orderId}`);
+    const notificationModule = container.resolve(Modules.NOTIFICATION);
+    if (notificationModule) {
+      try {
+        logger.info(`[Paystack] Sending payment confirmation email to ${order.email}`);
+        await notificationModule.createNotifications([{
+          to: order.email,
+          channel: "email",
+          template: "paystack-payment-success",
+          data: {
+            order_id: order.id,
+            amount: capturedAmount,
+            currency: order.currency_code,
+          }
+        }]);
+        logger.info(`[Paystack] Payment confirmation email successfully sent to ${order.email}`);
+      } catch (err) {
+        logger.error(`[Paystack] Failed to send email for Order ${orderId}`, err);
+      }
+    } else {
+      logger.warn(`[Paystack] Notification module not found. Skipping email for Order ${orderId}`);
+    }
+  } catch (error) {
+    logger.error(`[Paystack] Unexpected error in order placed handler for Order ${orderId}`, error);
   }
 }
 

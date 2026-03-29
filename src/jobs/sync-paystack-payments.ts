@@ -41,7 +41,7 @@ export default async function syncPaystackPayments(container: MedusaContainer) {
     });
     
     const pendingPayments = payments.filter(
-      (p) => 
+      (p: any) => 
         !p.captured_at && 
         !p.canceled_at && 
         p.created_at && new Date(p.created_at as any) < fifteenMinutesAgo

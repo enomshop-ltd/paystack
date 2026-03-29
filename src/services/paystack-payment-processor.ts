@@ -73,43 +73,41 @@ class PaystackPaymentProcessor extends AbstractPaymentProvider<PaystackPaymentPr
     this.configuration = options;
     this.paystack = new Paystack(this.configuration.secret_key, {
       disable_retries: options.disable_retries,
+      logger: cradle.logger,
+      debug: Boolean(options.debug),
     });
     this.debug = Boolean(options.debug);
     this.logger = cradle.logger;
+    if (this.debug) {
+      this.logger.info("PS_P_Debug: PaystackPaymentProcessor initialized with options: " + JSON.stringify({ disable_retries: options.disable_retries, debug: options.debug }));
+    }
   }
 
   async initiatePayment(
     initiatePaymentData: InitiatePaymentInput,
   ): Promise<InitiatePaymentOutput> {
     if (this.debug) {
-      this.logger.info(
-        `PS_P_Debug: InitiatePayment ${JSON.stringify(initiatePaymentData, null, 2)}`
-      );
+      this.logger.info(`PS_P_Debug: initiatePayment called with input: ${JSON.stringify(initiatePaymentData, null, 2)}`);
     }
     const { data, amount, currency_code } = initiatePaymentData;
     const { email, session_id, order_id, cart_id, callback_url, ...customMetadata } = (data ?? {}) as any;
-
     const validatedCurrencyCode = formatCurrencyCode(currency_code);
     const SUPPORTED_CURRENCIES = ["NGN", "GHS", "ZAR", "USD", "KES", "EGP", "RWF"];
     if (!SUPPORTED_CURRENCIES.includes(validatedCurrencyCode)) {
-      throw new MedusaError(
-        MedusaError.Types.INVALID_DATA,
-        `Currency ${validatedCurrencyCode} is not supported by Paystack. Supported currencies are: ${SUPPORTED_CURRENCIES.join(", ")}`
-      );
+      const errorMsg = `Currency ${validatedCurrencyCode} is not supported by Paystack. Supported currencies are: ${SUPPORTED_CURRENCIES.join(", ")}`;
+      if (this.debug) this.logger.error(`PS_P_Debug: initiatePayment error: ${errorMsg}`);
+      throw new MedusaError(MedusaError.Types.INVALID_DATA, errorMsg);
     }
-
     if (!email) {
-      throw new MedusaError(
-        MedusaError.Types.INVALID_ARGUMENT,
-        "Email is required to initiate a Paystack payment. Ensure you are providing the email in the context object when calling `initiatePaymentSession` in your Medusa storefront",
-      );
+      const errorMsg = "Email is required to initiate a Paystack payment. Ensure you are providing the email in the context object when calling `initiatePaymentSession` in your Medusa storefront";
+      if (this.debug) this.logger.error(`PS_P_Debug: initiatePayment error: ${errorMsg}`);
+      throw new MedusaError(MedusaError.Types.INVALID_ARGUMENT, errorMsg);
     }
-
-    // FIX: Multiply amount by 100 for subunits
     const paystackAmount = Math.round(Number(amount) * 100);
-    // FIX: Generate a custom reference
     const reference = customMetadata?.reference || `TX${Date.now().toString().slice(-8)}${Math.floor(100 + Math.random() * 900)}`;
-
+    if (this.debug) {
+      this.logger.info(`PS_P_Debug: initiatePayment initializing transaction with Paystack. Amount: ${paystackAmount}, Currency: ${validatedCurrencyCode}, Reference: ${reference}, Email: ${email}`);
+    }
     try {
       const {
         data: psData,
@@ -128,7 +126,9 @@ class PaystackPaymentProcessor extends AbstractPaymentProvider<PaystackPaymentPr
           ...customMetadata,
         },
       });
-
+      if (this.debug) {
+        this.logger.info(`PS_P_Debug: initiatePayment Paystack response status: ${status}, message: ${message}, data: ${JSON.stringify(psData, null, 2)}`);
+      }
       if (status === false) {
         throw new MedusaError(
           MedusaError.Types.UNEXPECTED_STATE,
@@ -136,7 +136,6 @@ class PaystackPaymentProcessor extends AbstractPaymentProvider<PaystackPaymentPr
           message,
         );
       }
-
       return {
         id: psData.reference,
         status: PaymentSessionStatus.PENDING,
@@ -148,7 +147,7 @@ class PaystackPaymentProcessor extends AbstractPaymentProvider<PaystackPaymentPr
       };
     } catch (error) {
       if (this.debug) {
-        this.logger.error("PS_P_Debug: InitiatePayment: Error", error);
+        this.logger.error("PS_P_Debug: initiatePayment caught error", error);
       }
       throw new MedusaError(
         MedusaError.Types.UNEXPECTED_STATE,
@@ -162,19 +161,25 @@ class PaystackPaymentProcessor extends AbstractPaymentProvider<PaystackPaymentPr
     input: CreateAccountHolderInput
   ): Promise<Record<string, unknown>> {
     if (this.debug) {
-      this.logger.info(`PS_P_Debug: createAccountHolder ${JSON.stringify(input, null, 2)}`);
+      this.logger.info(`PS_P_Debug: createAccountHolder called with input: ${JSON.stringify(input, null, 2)}`);
     }
     const { customer } = input.context || {};
     if (!customer?.email) {
-      return { id: `ps_mock_${Date.now()}` };
+      const mockId = `ps_mock_${Date.now()}`;
+      if (this.debug) this.logger.info(`PS_P_Debug: createAccountHolder no email provided, returning mock ID: ${mockId}`);
+      return { id: mockId };
     }
     try {
+      if (this.debug) this.logger.info(`PS_P_Debug: createAccountHolder creating customer with Paystack for email: ${customer.email}`);
       const { data, status, message } = await this.paystack.customer.create({
         email: customer.email,
         first_name: customer.first_name ?? undefined,
         last_name: customer.last_name ?? undefined,
         phone: customer.phone ?? undefined,
       });
+      if (this.debug) {
+        this.logger.info(`PS_P_Debug: createAccountHolder Paystack response status: ${status}, message: ${message}, data: ${JSON.stringify(data, null, 2)}`);
+      }
       if (status === false) {
         throw new MedusaError(
           MedusaError.Types.UNEXPECTED_STATE,
@@ -184,7 +189,7 @@ class PaystackPaymentProcessor extends AbstractPaymentProvider<PaystackPaymentPr
       return { id: data.customer_code };
     } catch (error: any) {
       if (this.debug) {
-        this.logger.error("PS_P_Debug: createAccountHolder: Error", error);
+        this.logger.error("PS_P_Debug: createAccountHolder caught error", error);
       }
       throw new MedusaError(
         MedusaError.Types.UNEXPECTED_STATE,
@@ -198,16 +203,17 @@ class PaystackPaymentProcessor extends AbstractPaymentProvider<PaystackPaymentPr
     input: UpdateAccountHolderInput
   ): Promise<Record<string, unknown>> {
     if (this.debug) {
-      this.logger.info(`PS_P_Debug: updateAccountHolder ${JSON.stringify(input, null, 2)}`);
+      this.logger.info(`PS_P_Debug: updateAccountHolder called with input: ${JSON.stringify(input, null, 2)}`);
     }
     const { account_holder, customer } = input.context || {};
     const customerCode = account_holder?.data?.id as string | undefined;
-
     if (!customerCode || !customerCode.startsWith("CUS_") || !customer) {
-      return { id: customerCode || `ps_mock_${Date.now()}` };
+      const returnId = customerCode || `ps_mock_${Date.now()}`;
+      if (this.debug) this.logger.info(`PS_P_Debug: updateAccountHolder invalid customer code or no customer data, returning ID: ${returnId}`);
+      return { id: returnId };
     }
-
     try {
+      if (this.debug) this.logger.info(`PS_P_Debug: updateAccountHolder updating customer ${customerCode} with Paystack`);
       const { status, message } = await this.paystack.customer.update(
         customerCode,
         {
@@ -216,7 +222,9 @@ class PaystackPaymentProcessor extends AbstractPaymentProvider<PaystackPaymentPr
           phone: customer.phone ?? undefined,
         }
       );
-
+      if (this.debug) {
+        this.logger.info(`PS_P_Debug: updateAccountHolder Paystack response status: ${status}, message: ${message}`);
+      }
       if (status === false) {
         if (this.debug) {
           this.logger.error(`PS_P_Debug: updateAccountHolder API Error: ${message}`);
@@ -225,7 +233,7 @@ class PaystackPaymentProcessor extends AbstractPaymentProvider<PaystackPaymentPr
       return { id: customerCode };
     } catch (error: any) {
       if (this.debug) {
-        this.logger.error("PS_P_Debug: updateAccountHolder: Error", error);
+        this.logger.error("PS_P_Debug: updateAccountHolder caught error", error);
       }
       return { id: customerCode };
     }
@@ -235,16 +243,18 @@ class PaystackPaymentProcessor extends AbstractPaymentProvider<PaystackPaymentPr
     input: DeleteAccountHolderInput
   ): Promise<void> {
     if (this.debug) {
-      this.logger.info(`PS_P_Debug: deleteAccountHolder ${JSON.stringify(input, null, 2)}`);
+      this.logger.info(`PS_P_Debug: deleteAccountHolder called with input: ${JSON.stringify(input, null, 2)} (No-op)`);
     }
     return;
   }
 
   async updatePayment(input: UpdatePaymentInput): Promise<UpdatePaymentOutput> {
     if (this.debug) {
-      this.logger.info(`PS_P_Debug: UpdatePayment ${JSON.stringify(input, null, 2)}`);
+      this.logger.info(`PS_P_Debug: updatePayment called with input: ${JSON.stringify(input, null, 2)}`);
     }
+    if (this.debug) this.logger.info("PS_P_Debug: updatePayment delegating to initiatePayment");
     const session = await this.initiatePayment(input);
+    if (this.debug) this.logger.info(`PS_P_Debug: updatePayment returning session status: ${session.status}`);
     return {
       data: session.data,
       status: session.status,
@@ -255,32 +265,22 @@ class PaystackPaymentProcessor extends AbstractPaymentProvider<PaystackPaymentPr
     input: AuthorizePaymentInput,
   ): Promise<AuthorizePaymentOutput> {
     if (this.debug) {
-      this.logger.info(
-        `PS_P_Debug: AuthorizePayment ${JSON.stringify(input, null, 2)}`
-      );
+      this.logger.info(`PS_P_Debug: authorizePayment called with input: ${JSON.stringify(input, null, 2)}`);
     }
     try {
-      const { paystackTxRef } =
-        input.data as PaystackPaymentProviderSessionData;
-
+      const { paystackTxRef } = input.data as PaystackPaymentProviderSessionData;
       if (!paystackTxRef) {
-        throw new MedusaError(
-          MedusaError.Types.INVALID_DATA,
-          "Missing paystackTxRef in payment data.",
-        );
+        const errorMsg = "Missing paystackTxRef in payment data.";
+        if (this.debug) this.logger.error(`PS_P_Debug: authorizePayment error: ${errorMsg}`);
+        throw new MedusaError(MedusaError.Types.INVALID_DATA, errorMsg);
       }
-
-      const { status: psStatus, data } = await this.paystack.transaction.verify(
-        paystackTxRef
-      );
-
+      if (this.debug) this.logger.info(`PS_P_Debug: authorizePayment verifying transaction ${paystackTxRef} with Paystack`);
+      const { status: psStatus, data } = await this.paystack.transaction.verify(paystackTxRef);
       if (this.debug) {
-        this.logger.info(
-          `PS_P_Debug: AuthorizePayment: Verification ${JSON.stringify({ psStatus, data }, null, 2)}`
-        );
+        this.logger.info(`PS_P_Debug: authorizePayment Paystack verification response status: ${psStatus}, data: ${JSON.stringify(data, null, 2)}`);
       }
-
       if (psStatus === false) {
+        if (this.debug) this.logger.warn("PS_P_Debug: authorizePayment Paystack verification returned false status");
         return {
           status: PaymentSessionStatus.ERROR,
           data: {
@@ -290,11 +290,11 @@ class PaystackPaymentProcessor extends AbstractPaymentProvider<PaystackPaymentPr
           },
         };
       }
-
       switch (data.status) {
         case "success":
+          if (this.debug) this.logger.info("PS_P_Debug: authorizePayment transaction successful, returning CAPTURED status");
           return {
-            status: PaymentSessionStatus.AUTHORIZED,
+            status: PaymentSessionStatus.CAPTURED,
             data: {
               ...input.data,
               paystackTxId: data.id,
@@ -302,6 +302,7 @@ class PaystackPaymentProcessor extends AbstractPaymentProvider<PaystackPaymentPr
             },
           };
         case "failed":
+          if (this.debug) this.logger.info("PS_P_Debug: authorizePayment transaction failed, returning ERROR status");
           return {
             status: PaymentSessionStatus.ERROR,
             data: {
@@ -311,6 +312,7 @@ class PaystackPaymentProcessor extends AbstractPaymentProvider<PaystackPaymentPr
             },
           };
         default:
+          if (this.debug) this.logger.info(`PS_P_Debug: authorizePayment transaction status is ${data.status}, returning PENDING status`);
           return {
             status: PaymentSessionStatus.PENDING,
             data: {
@@ -322,7 +324,7 @@ class PaystackPaymentProcessor extends AbstractPaymentProvider<PaystackPaymentPr
       }
     } catch (error) {
       if (this.debug) {
-        this.logger.error("PS_P_Debug: AuthorizePayment: Error", error);
+        this.logger.error("PS_P_Debug: authorizePayment caught error", error);
       }
       throw new MedusaError(
         MedusaError.Types.UNEXPECTED_STATE,
@@ -336,25 +338,20 @@ class PaystackPaymentProcessor extends AbstractPaymentProvider<PaystackPaymentPr
     input: RetrievePaymentInput,
   ): Promise<RetrievePaymentOutput> {
     if (this.debug) {
-      this.logger.info(
-        `PS_P_Debug: RetrievePayment ${JSON.stringify(input, null, 2)}`
-      );
+      this.logger.info(`PS_P_Debug: retrievePayment called with input: ${JSON.stringify(input, null, 2)}`);
     }
     try {
-      const { paystackTxId } =
-        input.data as AuthorizedPaystackPaymentProviderSessionData;
-
+      const { paystackTxId } = input.data as AuthorizedPaystackPaymentProviderSessionData;
       if (!paystackTxId) {
-        throw new MedusaError(
-          MedusaError.Types.INVALID_DATA,
-          "Missing paystackTxId in payment data. This payment has not been authorized.",
-        );
+        const errorMsg = "Missing paystackTxId in payment data. This payment has not been authorized.";
+        if (this.debug) this.logger.error(`PS_P_Debug: retrievePayment error: ${errorMsg}`);
+        throw new MedusaError(MedusaError.Types.INVALID_DATA, errorMsg);
       }
-
-      const { data, status, message } = await this.paystack.transaction.get({
-        id: paystackTxId,
-      });
-
+      if (this.debug) this.logger.info(`PS_P_Debug: retrievePayment fetching transaction ${paystackTxId} from Paystack`);
+      const { data, status, message } = await this.paystack.transaction.get({ id: paystackTxId });
+      if (this.debug) {
+        this.logger.info(`PS_P_Debug: retrievePayment Paystack response status: ${status}, message: ${message}, data: ${JSON.stringify(data, null, 2)}`);
+      }
       if (status === false) {
         throw new MedusaError(
           MedusaError.Types.UNEXPECTED_STATE,
@@ -362,7 +359,6 @@ class PaystackPaymentProcessor extends AbstractPaymentProvider<PaystackPaymentPr
           message,
         );
       }
-
       return {
         data: {
           ...input.data,
@@ -371,7 +367,7 @@ class PaystackPaymentProcessor extends AbstractPaymentProvider<PaystackPaymentPr
       };
     } catch (error) {
       if (this.debug) {
-        this.logger.error("PS_P_Debug: RetrievePayment: Error", error);
+        this.logger.error("PS_P_Debug: retrievePayment caught error", error);
       }
       throw new MedusaError(
         MedusaError.Types.UNEXPECTED_STATE,
@@ -383,24 +379,24 @@ class PaystackPaymentProcessor extends AbstractPaymentProvider<PaystackPaymentPr
 
   async refundPayment(input: RefundPaymentInput): Promise<RefundPaymentOutput> {
     if (this.debug) {
-      this.logger.info(`PS_P_Debug: RefundPayment ${JSON.stringify(input, null, 2)}`);
+      this.logger.info(`PS_P_Debug: refundPayment called with input: ${JSON.stringify(input, null, 2)}`);
     }
     try {
-      const { paystackTxId } =
-        input.data as AuthorizedPaystackPaymentProviderSessionData;
-
+      const { paystackTxId } = input.data as AuthorizedPaystackPaymentProviderSessionData;
       if (!paystackTxId) {
-        throw new MedusaError(
-          MedusaError.Types.INVALID_DATA,
-          "Missing paystackTxId in payment data.",
-        );
+        const errorMsg = "Missing paystackTxId in payment data.";
+        if (this.debug) this.logger.error(`PS_P_Debug: refundPayment error: ${errorMsg}`);
+        throw new MedusaError(MedusaError.Types.INVALID_DATA, errorMsg);
       }
-
+      const refundAmount = Math.round(Number(input.amount) * 100);
+      if (this.debug) this.logger.info(`PS_P_Debug: refundPayment initiating refund with Paystack for transaction ${paystackTxId}, amount: ${refundAmount}`);
       const { data, status, message } = await this.paystack.refund.create({
         transaction: paystackTxId,
-        amount: Math.round(Number(input.amount) * 100), // FIX: Subunit conversion
+        amount: refundAmount,
       });
-
+      if (this.debug) {
+        this.logger.info(`PS_P_Debug: refundPayment Paystack response status: ${status}, message: ${message}, data: ${JSON.stringify(data, null, 2)}`);
+      }
       if (status === false) {
         throw new MedusaError(
           MedusaError.Types.UNEXPECTED_STATE,
@@ -408,7 +404,6 @@ class PaystackPaymentProcessor extends AbstractPaymentProvider<PaystackPaymentPr
           message,
         );
       }
-
       return {
         data: {
           ...input.data,
@@ -417,7 +412,7 @@ class PaystackPaymentProcessor extends AbstractPaymentProvider<PaystackPaymentPr
       };
     } catch (error) {
       if (this.debug) {
-        this.logger.error("PS_P_Debug: RefundPayment: Error", error);
+        this.logger.error("PS_P_Debug: refundPayment caught error", error);
       }
       throw new MedusaError(
         MedusaError.Types.UNEXPECTED_STATE,
@@ -431,43 +426,37 @@ class PaystackPaymentProcessor extends AbstractPaymentProvider<PaystackPaymentPr
     input: GetPaymentStatusInput,
   ): Promise<GetPaymentStatusOutput> {
     if (this.debug) {
-      this.logger.info(
-        `PS_P_Debug: GetPaymentStatus ${JSON.stringify(input, null, 2)}`
-      );
+      this.logger.info(`PS_P_Debug: getPaymentStatus called with input: ${JSON.stringify(input, null, 2)}`);
     }
-    const { paystackTxId } =
-      input.data as AuthorizedPaystackPaymentProviderSessionData;
-
+    const { paystackTxId } = input.data as AuthorizedPaystackPaymentProviderSessionData;
     if (!paystackTxId) {
+      if (this.debug) this.logger.info("PS_P_Debug: getPaymentStatus no paystackTxId found, returning PENDING");
       return { status: PaymentSessionStatus.PENDING };
     }
-
     try {
-      const { data, status } = await this.paystack.transaction.get({
-        id: paystackTxId,
-      });
-
+      if (this.debug) this.logger.info(`PS_P_Debug: getPaymentStatus fetching transaction ${paystackTxId} from Paystack`);
+      const { data, status } = await this.paystack.transaction.get({ id: paystackTxId });
       if (this.debug) {
-        this.logger.info(
-          `PS_P_Debug: GetPaymentStatus: Verification ${JSON.stringify({ status, data }, null, 2)}`
-        );
+        this.logger.info(`PS_P_Debug: getPaymentStatus Paystack response status: ${status}, data: ${JSON.stringify(data, null, 2)}`);
       }
-
       if (status === false) {
+        if (this.debug) this.logger.warn("PS_P_Debug: getPaymentStatus Paystack returned false status, returning ERROR");
         return { status: PaymentSessionStatus.ERROR };
       }
-
       switch (data?.status) {
         case "success":
-          return { status: PaymentSessionStatus.AUTHORIZED };
+          if (this.debug) this.logger.info("PS_P_Debug: getPaymentStatus transaction successful, returning CAPTURED");
+          return { status: PaymentSessionStatus.CAPTURED };
         case "failed":
+          if (this.debug) this.logger.info("PS_P_Debug: getPaymentStatus transaction failed, returning ERROR");
           return { status: PaymentSessionStatus.ERROR };
         default:
+          if (this.debug) this.logger.info(`PS_P_Debug: getPaymentStatus transaction status is ${data?.status}, returning PENDING`);
           return { status: PaymentSessionStatus.PENDING };
       }
     } catch (error) {
       if (this.debug) {
-        this.logger.error("PS_P_Debug: GetPaymentStatus: Error", error);
+        this.logger.error("PS_P_Debug: getPaymentStatus caught error", error);
       }
       return { status: PaymentSessionStatus.ERROR };
     }
@@ -489,30 +478,30 @@ class PaystackPaymentProcessor extends AbstractPaymentProvider<PaystackPaymentPr
     rawData: string | Buffer;
     headers: Record<string, unknown>;
   }): Promise<WebhookActionResult> {
-    
-    // ... hash validation remains the same ...
+    if (this.debug) {
+      this.logger.info(`PS_P_Debug: getWebhookActionAndData called for event: ${event}, reference: ${data?.reference}`);
+    }
     const webhookSecretKey = this.configuration.secret_key;
     const hash = crypto
       .createHmac("sha512", webhookSecretKey)
       .update(rawData)
       .digest("hex");
-
     if (hash !== headers["x-paystack-signature"]) {
+      if (this.debug) this.logger.warn("PS_P_Debug: getWebhookActionAndData signature mismatch");
       return { action: PaymentActions.NOT_SUPPORTED };
     }
-
     if (event !== "charge.success") {
+      if (this.debug) this.logger.info(`PS_P_Debug: getWebhookActionAndData ignoring event type: ${event}`);
       return { action: PaymentActions.NOT_SUPPORTED };
     }
-
     const reference = data.reference;
     if (!reference) {
-      if (this.debug) this.logger.error("PS_P_Debug: No reference found in webhook data");
+      if (this.debug) this.logger.error("PS_P_Debug: getWebhookActionAndData no reference found in webhook data");
       return { action: PaymentActions.NOT_SUPPORTED };
     }
-
+    if (this.debug) this.logger.info(`PS_P_Debug: getWebhookActionAndData returning AUTHORIZED for reference: ${reference}`);
     return {
-      action: PaymentActions.SUCCESSFUL,
+      action: PaymentActions.AUTHORIZED,
       data: {
         session_id: reference, 
         amount: Math.round(Number(data.amount)),
@@ -523,14 +512,23 @@ class PaystackPaymentProcessor extends AbstractPaymentProvider<PaystackPaymentPr
   async capturePayment(
     input: CapturePaymentInput,
   ): Promise<CapturePaymentOutput> {
+    if (this.debug) {
+      this.logger.info(`PS_P_Debug: capturePayment called with input: ${JSON.stringify(input, null, 2)} (No-op)`);
+    }
     return { data: input.data };
   }
 
   async cancelPayment(input: CancelPaymentInput): Promise<CancelPaymentOutput> {
+    if (this.debug) {
+      this.logger.info(`PS_P_Debug: cancelPayment called with input: ${JSON.stringify(input, null, 2)} (No-op)`);
+    }
     return { data: input.data };
   }
 
   async deletePayment(input: DeletePaymentInput): Promise<DeletePaymentOutput> {
+    if (this.debug) {
+      this.logger.info(`PS_P_Debug: deletePayment called with input: ${JSON.stringify(input, null, 2)} (No-op)`);
+    }
     return { data: input.data };
   }
 }
