@@ -1,14 +1,13 @@
 import { MedusaContainer } from "@medusajs/framework/types";
 import { Modules } from "@medusajs/framework/utils";
 import Paystack from "../lib/paystack";
-import { captureOrderPaymentWorkflow } from "@medusajs/core-flows";
+import { capturePaymentWorkflow } from "@medusajs/core-flows";
 
 // Helper to prevent hitting Paystack rate limits
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export default async function syncPaystackPayments(container: MedusaContainer) {
   const logger = container.resolve("logger");
-  // 1. Resolve the query tool
   const query = container.resolve("query");
 
   logger.info("Starting Paystack payment sync...");
@@ -60,18 +59,15 @@ export default async function syncPaystackPayments(container: MedusaContainer) {
 
     for (const payment of pendingPayments) {
       try {
-        // Note: query.graph returns 'data' as part of the payment object
         const txRef = (payment.data as any)?.paystackTxRef as string;
         if (!txRef) continue;
 
-        // 3. Verify transaction status with Paystack
         const { data, status } = await paystack.transaction.verify(txRef);
 
         if (status && data.status === "success") {
           logger.info(`Capturing payment ${payment.id} from Paystack sync`);
           
-          // 4. Capture the payment in Medusa
-          await captureOrderPaymentWorkflow(container).run({
+          await capturePaymentWorkflow(container).run({
             input: {
               payment_id: payment.id,
             }
@@ -80,7 +76,6 @@ export default async function syncPaystackPayments(container: MedusaContainer) {
           logger.info(`Canceling failed/abandoned payment ${payment.id} from Paystack sync`);
         }
 
-        // 5. Sleep for 200ms to respect Paystack API rate limits
         await sleep(200);
 
       } catch (error) {
