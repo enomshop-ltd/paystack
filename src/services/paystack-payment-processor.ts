@@ -482,18 +482,15 @@ class PaystackPaymentProcessor extends AbstractPaymentProvider<PaystackPaymentPr
       event: string;
       data: {
         amount: number;
+        reference: string; 
         metadata?: Record<string, any>;
       };
     };
     rawData: string | Buffer;
     headers: Record<string, unknown>;
   }): Promise<WebhookActionResult> {
-    if (this.debug) {
-      this.logger.info(
-        `PS_P_Debug: Handling webhook event ${JSON.stringify({ data, headers }, null, 2)}`
-      );
-    }
-
+    
+    // ... hash validation remains the same ...
     const webhookSecretKey = this.configuration.secret_key;
     const hash = crypto
       .createHmac("sha512", webhookSecretKey)
@@ -501,41 +498,24 @@ class PaystackPaymentProcessor extends AbstractPaymentProvider<PaystackPaymentPr
       .digest("hex");
 
     if (hash !== headers["x-paystack-signature"]) {
-      return {
-        action: PaymentActions.NOT_SUPPORTED,
-      };
+      return { action: PaymentActions.NOT_SUPPORTED };
     }
 
     if (event !== "charge.success") {
-      return {
-        action: PaymentActions.NOT_SUPPORTED,
-      };
+      return { action: PaymentActions.NOT_SUPPORTED };
     }
 
-    // Extract your identifiers from Paystack's metadata
-    const metadata = data.metadata || {};
-    const sessionId = metadata.session_id;
-    const cartId = metadata.cart_id;
-
-    if (!sessionId && !cartId) {
-      if (this.debug) {
-        this.logger.error(
-          "PS_P_Debug: No sessionId or cartId found in webhook transaction metadata",
-        );
-      }
-      return {
-        action: PaymentActions.NOT_SUPPORTED,
-      };
+    const reference = data.reference;
+    if (!reference) {
+      if (this.debug) this.logger.error("PS_P_Debug: No reference found in webhook data");
+      return { action: PaymentActions.NOT_SUPPORTED };
     }
 
     return {
       action: PaymentActions.SUCCESSFUL,
       data: {
-        session_id: sessionId,
-        // Medusa's native property accepts the cart ID perfectly here
-        resource_id: cartId || sessionId, 
-        // Ensure amount is synced to the lowest denomination without the /100 division
-        amount: Math.round(Number(data.amount)), 
+        session_id: reference, 
+        amount: Math.round(Number(data.amount)),
       },
     };
   }
