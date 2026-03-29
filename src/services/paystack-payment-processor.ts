@@ -1,6 +1,5 @@
 import crypto from "crypto";
 import Paystack from "../lib/paystack";
-
 import {
   AuthorizePaymentInput,
   AuthorizePaymentOutput,
@@ -19,8 +18,8 @@ import {
   UpdatePaymentInput,
   UpdatePaymentOutput,
   WebhookActionResult,
-  CreateAccountHolderInput, 
-  UpdateAccountHolderInput, 
+  CreateAccountHolderInput,
+  UpdateAccountHolderInput,
   DeleteAccountHolderInput,
   type CancelPaymentInput,
   type CancelPaymentOutput,
@@ -55,7 +54,6 @@ export interface PaystackPaymentProcessorConfig
 
 class PaystackPaymentProcessor extends AbstractPaymentProvider<PaystackPaymentProcessorConfig> {
   static identifier = "paystack";
-
   protected readonly configuration: PaystackPaymentProcessorConfig;
   protected readonly paystack: Paystack;
   protected readonly debug: boolean;
@@ -66,14 +64,12 @@ class PaystackPaymentProcessor extends AbstractPaymentProvider<PaystackPaymentPr
     options: PaystackPaymentProcessorConfig,
   ) {
     super(cradle, options);
-
     if (!options.secret_key) {
       throw new MedusaError(
         MedusaError.Types.INVALID_ARGUMENT,
         "The Paystack provider requires the secret_key option",
       );
     }
-
     this.configuration = options;
     this.paystack = new Paystack(this.configuration.secret_key, {
       disable_retries: options.disable_retries,
@@ -90,7 +86,6 @@ class PaystackPaymentProcessor extends AbstractPaymentProvider<PaystackPaymentPr
         `PS_P_Debug: InitiatePayment ${JSON.stringify(initiatePaymentData, null, 2)}`
       );
     }
-
     const { data, amount, currency_code } = initiatePaymentData;
     const { email, session_id, order_id, callback_url, ...customMetadata } = (data ?? {}) as {
       email?: string;
@@ -101,8 +96,7 @@ class PaystackPaymentProcessor extends AbstractPaymentProvider<PaystackPaymentPr
     };
 
     const validatedCurrencyCode = formatCurrencyCode(currency_code);
-
-    const SUPPORTED_CURRENCIES =["NGN", "GHS", "ZAR", "USD", "KES", "EGP", "RWF"];
+    const SUPPORTED_CURRENCIES = ["NGN", "GHS", "ZAR", "USD", "KES", "EGP", "RWF"];
     if (!SUPPORTED_CURRENCIES.includes(validatedCurrencyCode)) {
       throw new MedusaError(
         MedusaError.Types.INVALID_DATA,
@@ -117,15 +111,21 @@ class PaystackPaymentProcessor extends AbstractPaymentProvider<PaystackPaymentPr
       );
     }
 
+    // FIX: Multiply amount by 100 for subunits
+    const paystackAmount = Math.round(Number(amount) * 100);
+    // FIX: Generate a custom reference
+    const reference = customMetadata?.reference || `TX${Date.now().toString().slice(-8)}${Math.floor(100 + Math.random() * 900)}`;
+
     try {
       const {
         data: psData,
         status,
         message,
       } = await this.paystack.transaction.initialize({
-        amount: Math.round(Number(amount)),
+        amount: paystackAmount,
         email,
         currency: validatedCurrencyCode,
+        reference,
         callback_url,
         metadata: {
           session_id,
@@ -155,7 +155,6 @@ class PaystackPaymentProcessor extends AbstractPaymentProvider<PaystackPaymentPr
       if (this.debug) {
         this.logger.error("PS_P_Debug: InitiatePayment: Error", error);
       }
-
       throw new MedusaError(
         MedusaError.Types.UNEXPECTED_STATE,
         "Failed to initiate Paystack payment",
@@ -170,13 +169,10 @@ class PaystackPaymentProcessor extends AbstractPaymentProvider<PaystackPaymentPr
     if (this.debug) {
       this.logger.info(`PS_P_Debug: createAccountHolder ${JSON.stringify(input, null, 2)}`);
     }
-
     const { customer } = input.context || {};
-    
     if (!customer?.email) {
       return { id: `ps_mock_${Date.now()}` };
     }
-
     try {
       const { data, status, message } = await this.paystack.customer.create({
         email: customer.email,
@@ -184,20 +180,17 @@ class PaystackPaymentProcessor extends AbstractPaymentProvider<PaystackPaymentPr
         last_name: customer.last_name ?? undefined,
         phone: customer.phone ?? undefined,
       });
-
       if (status === false) {
         throw new MedusaError(
           MedusaError.Types.UNEXPECTED_STATE,
           message || "Paystack API Error"
         );
       }
-
       return { id: data.customer_code };
     } catch (error: any) {
       if (this.debug) {
         this.logger.error("PS_P_Debug: createAccountHolder: Error", error);
       }
-
       throw new MedusaError(
         MedusaError.Types.UNEXPECTED_STATE,
         "Failed to create Paystack customer",
@@ -212,7 +205,6 @@ class PaystackPaymentProcessor extends AbstractPaymentProvider<PaystackPaymentPr
     if (this.debug) {
       this.logger.info(`PS_P_Debug: updateAccountHolder ${JSON.stringify(input, null, 2)}`);
     }
-
     const { account_holder, customer } = input.context || {};
     const customerCode = account_holder?.data?.id as string | undefined;
 
@@ -222,11 +214,11 @@ class PaystackPaymentProcessor extends AbstractPaymentProvider<PaystackPaymentPr
 
     try {
       const { status, message } = await this.paystack.customer.update(
-        customerCode, 
+        customerCode,
         {
           first_name: customer.first_name ?? undefined,
-        last_name: customer.last_name ?? undefined,
-        phone: customer.phone ?? undefined,
+          last_name: customer.last_name ?? undefined,
+          phone: customer.phone ?? undefined,
         }
       );
 
@@ -235,13 +227,11 @@ class PaystackPaymentProcessor extends AbstractPaymentProvider<PaystackPaymentPr
           this.logger.error(`PS_P_Debug: updateAccountHolder API Error: ${message}`);
         }
       }
-
       return { id: customerCode };
     } catch (error: any) {
       if (this.debug) {
         this.logger.error("PS_P_Debug: updateAccountHolder: Error", error);
       }
-      
       return { id: customerCode };
     }
   }
@@ -259,9 +249,7 @@ class PaystackPaymentProcessor extends AbstractPaymentProvider<PaystackPaymentPr
     if (this.debug) {
       this.logger.info(`PS_P_Debug: UpdatePayment ${JSON.stringify(input, null, 2)}`);
     }
-
     const session = await this.initiatePayment(input);
-
     return {
       data: session.data,
       status: session.status,
@@ -276,7 +264,6 @@ class PaystackPaymentProcessor extends AbstractPaymentProvider<PaystackPaymentPr
         `PS_P_Debug: AuthorizePayment ${JSON.stringify(input, null, 2)}`
       );
     }
-
     try {
       const { paystackTxRef } =
         input.data as PaystackPaymentProviderSessionData;
@@ -312,7 +299,7 @@ class PaystackPaymentProcessor extends AbstractPaymentProvider<PaystackPaymentPr
       switch (data.status) {
         case "success":
           return {
-            status: PaymentSessionStatus.AUTHORIZED, 
+            status: PaymentSessionStatus.AUTHORIZED,
             data: {
               ...input.data,
               paystackTxId: data.id,
@@ -342,7 +329,6 @@ class PaystackPaymentProcessor extends AbstractPaymentProvider<PaystackPaymentPr
       if (this.debug) {
         this.logger.error("PS_P_Debug: AuthorizePayment: Error", error);
       }
-
       throw new MedusaError(
         MedusaError.Types.UNEXPECTED_STATE,
         "Failed to authorize payment",
@@ -359,7 +345,6 @@ class PaystackPaymentProcessor extends AbstractPaymentProvider<PaystackPaymentPr
         `PS_P_Debug: RetrievePayment ${JSON.stringify(input, null, 2)}`
       );
     }
-
     try {
       const { paystackTxId } =
         input.data as AuthorizedPaystackPaymentProviderSessionData;
@@ -393,7 +378,6 @@ class PaystackPaymentProcessor extends AbstractPaymentProvider<PaystackPaymentPr
       if (this.debug) {
         this.logger.error("PS_P_Debug: RetrievePayment: Error", error);
       }
-
       throw new MedusaError(
         MedusaError.Types.UNEXPECTED_STATE,
         "Failed to retrieve payment",
@@ -406,7 +390,6 @@ class PaystackPaymentProcessor extends AbstractPaymentProvider<PaystackPaymentPr
     if (this.debug) {
       this.logger.info(`PS_P_Debug: RefundPayment ${JSON.stringify(input, null, 2)}`);
     }
-
     try {
       const { paystackTxId } =
         input.data as AuthorizedPaystackPaymentProviderSessionData;
@@ -420,7 +403,7 @@ class PaystackPaymentProcessor extends AbstractPaymentProvider<PaystackPaymentPr
 
       const { data, status, message } = await this.paystack.refund.create({
         transaction: paystackTxId,
-        amount: Math.round(Number(input.amount)),
+        amount: Math.round(Number(input.amount) * 100), // FIX: Subunit conversion
       });
 
       if (status === false) {
@@ -441,7 +424,6 @@ class PaystackPaymentProcessor extends AbstractPaymentProvider<PaystackPaymentPr
       if (this.debug) {
         this.logger.error("PS_P_Debug: RefundPayment: Error", error);
       }
-
       throw new MedusaError(
         MedusaError.Types.UNEXPECTED_STATE,
         "Failed to refund payment",
@@ -458,7 +440,6 @@ class PaystackPaymentProcessor extends AbstractPaymentProvider<PaystackPaymentPr
         `PS_P_Debug: GetPaymentStatus ${JSON.stringify(input, null, 2)}`
       );
     }
-
     const { paystackTxId } =
       input.data as AuthorizedPaystackPaymentProviderSessionData;
 
@@ -493,7 +474,6 @@ class PaystackPaymentProcessor extends AbstractPaymentProvider<PaystackPaymentPr
       if (this.debug) {
         this.logger.error("PS_P_Debug: GetPaymentStatus: Error", error);
       }
-
       return { status: PaymentSessionStatus.ERROR };
     }
   }
@@ -518,7 +498,6 @@ class PaystackPaymentProcessor extends AbstractPaymentProvider<PaystackPaymentPr
         `PS_P_Debug: Handling webhook event ${JSON.stringify({ data, headers }, null, 2)}`
       );
     }
-
     const webhookSecretKey = this.configuration.secret_key;
 
     const hash = crypto
@@ -558,10 +537,10 @@ class PaystackPaymentProcessor extends AbstractPaymentProvider<PaystackPaymentPr
     }
 
     return {
-      action: PaymentActions.AUTHORIZED,
+      action: PaymentActions.SUCCESSFUL, // FIX: Tell Medusa to capture automatically
       data: {
         session_id: sessionId,
-        amount: data.amount,
+        amount: Number(data.amount) / 100, // FIX: Convert from subunit back to main unit
       },
     };
   }
