@@ -493,8 +493,8 @@ class PaystackPaymentProcessor extends AbstractPaymentProvider<PaystackPaymentPr
         `PS_P_Debug: Handling webhook event ${JSON.stringify({ data, headers }, null, 2)}`
       );
     }
-    const webhookSecretKey = this.configuration.secret_key;
 
+    const webhookSecretKey = this.configuration.secret_key;
     const hash = crypto
       .createHmac("sha512", webhookSecretKey)
       .update(rawData)
@@ -512,38 +512,30 @@ class PaystackPaymentProcessor extends AbstractPaymentProvider<PaystackPaymentPr
       };
     }
 
-    const sessionId = data.metadata?.session_id;
-    const cartId = data.metadata?.cart_id;
-    const orderId = data.metadata?.order_id;
+    // Extract your identifiers from Paystack's metadata
+    const metadata = data.metadata || {};
+    const sessionId = metadata.session_id;
+    const cartId = metadata.cart_id;
 
-    if (!sessionId && !cartId && !orderId) {
-        if (this.debug) {
-            this.logger.error("PS_P_Debug: No Medusa reference found in webhook metadata");
-        }
-        return { action: PaymentActions.NOT_SUPPORTED };
+    if (!sessionId && !cartId) {
+      if (this.debug) {
+        this.logger.error(
+          "PS_P_Debug: No sessionId or cartId found in webhook transaction metadata",
+        );
+      }
+      return {
+        action: PaymentActions.NOT_SUPPORTED,
+      };
     }
 
     return {
-        action: PaymentActions.SUCCESSFUL,
-        data: {
-            session_id: sessionId,
-            cart_id: cartId,
-            order_id: orderId,
-            amount: Number(data.amount), // See Point 2 below regarding amounts
-        },
-    };
-
-    if (this.debug) {
-      this.logger.info(
-        `PS_P_Debug: Webhook event is valid ${JSON.stringify({ sessionId, amount: data.amount }, null, 2)}`
-      );
-    }
-
-    return {
-      action: PaymentActions.SUCCESSFUL, // FIX: Tell Medusa to capture automatically
+      action: PaymentActions.SUCCESSFUL,
       data: {
         session_id: sessionId,
-        amount: Number(data.amount) / 100, // FIX: Convert from subunit back to main unit
+        // Medusa's native property accepts the cart ID perfectly here
+        resource_id: cartId || sessionId, 
+        // Ensure amount is synced to the lowest denomination without the /100 division
+        amount: Math.round(Number(data.amount)), 
       },
     };
   }
