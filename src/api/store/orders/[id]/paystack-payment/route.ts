@@ -15,9 +15,14 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
 
   try {
     // 1. Retrieve the order and its payment collections
-    const order = await orderModule.retrieveOrder(order_id, {
-      relations: ["payment_collections", "payment_collections.payments"],
+    const query = req.scope.resolve("query");
+    const { data: orders } = await query.graph({
+      entity: "order",
+      fields:["id", "currency_code", "email", "total", "payment_collections.*", "payment_collections.payments.*"],
+      filters: { id: order_id }
     });
+    const order = orders[0];
+    const paymentCollection = order.payment_collections?.[0];
 
     // 2. Fallback to the order's email (Perfect for Guest Customers)
     const customerEmail = email || order.email;
@@ -26,7 +31,6 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
       return res.status(400).json({ message: "An email address is required to process Paystack payments." });
     }
 
-    const paymentCollection = (order as any).payment_collections?.[0];
     if (!paymentCollection) {
       return res.status(400).json({ message: "No payment collection found for this order" });
     }

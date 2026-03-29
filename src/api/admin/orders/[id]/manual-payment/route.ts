@@ -13,11 +13,14 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
   const paymentModule = req.scope.resolve(Modules.PAYMENT);
 
   try {
-    const order = await orderModule.retrieveOrder(order_id, {
-      relations: ["payment_collections"],
+    const query = req.scope.resolve("query");
+    const { data: orders } = await query.graph({
+      entity: "order",
+      fields:["id", "currency_code", "email", "total", "payment_collections.*", "payment_collections.payments.*"],
+      filters: { id: order_id }
     });
-
-    const paymentCollection = (order as any).payment_collections?.[0];
+    const order = orders[0];
+    const paymentCollection = order.payment_collections?.[0];
     if (!paymentCollection) {
       return res.status(400).json({ message: "No payment collection found for this order" });
     }
