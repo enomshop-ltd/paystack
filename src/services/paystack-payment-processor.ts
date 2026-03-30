@@ -58,10 +58,10 @@ class PaystackPaymentProcessor extends AbstractPaymentProvider<PaystackPaymentPr
   protected readonly paystack: Paystack;
   protected readonly debug: boolean;
   protected readonly logger: Logger;
-  protected readonly orderModuleService: any;
+  protected readonly query: any; // Add query
 
   constructor(
-    cradle: { logger: Logger; orderModuleService?: any } & Record<string, unknown>,
+    cradle: { logger: Logger; query: any } & Record<string, unknown>, // Update cradle injection
     options: PaystackPaymentProcessorConfig,
   ) {
     super(cradle, options);
@@ -79,7 +79,7 @@ class PaystackPaymentProcessor extends AbstractPaymentProvider<PaystackPaymentPr
     });
     this.debug = Boolean(options.debug);
     this.logger = cradle.logger;
-    this.orderModuleService = cradle.orderModuleService;
+    this.query = cradle.query; // ADD THIS LINE
     if (this.debug) {
       this.logger.info("PS_P_Debug: PaystackPaymentProcessor initialized with options: " + JSON.stringify({ disable_retries: options.disable_retries, debug: options.debug }));
     }
@@ -115,21 +115,23 @@ class PaystackPaymentProcessor extends AbstractPaymentProvider<PaystackPaymentPr
       if (order_id) {
         // Try to fetch the order to get the display_id (e.g., #18)
         try {
-          if (this.orderModuleService) {
-            const order = await this.orderModuleService.retrieveOrder(order_id);
-            if (order && order.display_id) {
-              displayIdStr = `${order.display_id}-`;
+          if (this.query) {
+            const { data: orders } = await this.query.graph({
+              entity: "order",
+              fields: ["display_id"],
+              filters: { id: order_id }
+            });
+            
+            if (orders && orders.length > 0 && orders[0].display_id) {
+              displayIdStr = `${orders[0].display_id}-`;
             }
           }
         } catch (e) {
           if (this.debug) this.logger.warn(`PS_P_Debug: Could not fetch order ${order_id} for display_id`);
         }
         // Strip the "order_" prefix
-        baseReference = order_id.replace(/^order_/, "");
+        baseReference = (order_id as string).replace(/^order_/, "");
       } else if (cart_id) {
-        // Strip the "cart_" prefix
-        baseReference = cart_id.replace(/^cart_/, "");
-      } else {
         baseReference = `TX${Date.now().toString().slice(-8)}`;
       }
     }
