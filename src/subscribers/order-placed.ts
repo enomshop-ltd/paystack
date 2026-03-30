@@ -44,8 +44,7 @@ export default async function PaystackOrderPlacedHandler({
     for (const payment of order.payment_collections[0].payments ||[]) {
       if (payment.provider_id === "paystack" || payment.provider_id === "pp_paystack") {
         isPaystackPayment = true;
-        capturedAmount = Number(payment.amount);
-        logger.info(`[Paystack] Found Paystack payment: ${payment.id} with amount: ${capturedAmount}`);
+        logger.info(`[Paystack] Found Paystack payment: ${payment.id} with amount: ${payment.amount}`);
 
         if (!payment.captured_at) {
           logger.info(`[Paystack] Payment ${payment.id} not yet captured. Initiating capture workflow.`);
@@ -56,13 +55,17 @@ export default async function PaystackOrderPlacedHandler({
               }
             });
             logger.info(`[Paystack] Successfully auto-captured payment ${payment.id} for Order ${orderId}`);
+            capturedAmount += Number(payment.amount);
           } catch (err) {
             logger.error(`[Paystack] Failed to auto-capture payment ${payment.id}:`, err);
             return;
           }
         } else {
           logger.info(`[Paystack] Payment ${payment.id} is already captured.`);
+          capturedAmount += Number(payment.amount);
         }
+        
+        logger.info(`[Paystack] Total captured so far: ${capturedAmount}`);
       }
     }
 
@@ -72,7 +75,8 @@ export default async function PaystackOrderPlacedHandler({
     }
 
     if (capturedAmount !== Number(order.total)) {
-      logger.warn(`[Paystack] Amount mismatch for Order ${orderId}. Total: ${order.total}, Captured: ${capturedAmount}`);
+      logger.warn(`[Paystack] Amount mismatch for Order ${orderId}. Total: ${order.total}, Captured: ${capturedAmount}. Skipping auto-fulfillment.`);
+      return;
     } else {
       logger.info(`[Paystack] Amount verified for Order ${orderId}. Total matches captured amount: ${capturedAmount}`);
     }

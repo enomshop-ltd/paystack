@@ -499,12 +499,23 @@ class PaystackPaymentProcessor extends AbstractPaymentProvider<PaystackPaymentPr
       if (this.debug) this.logger.error("PS_P_Debug: getWebhookActionAndData no reference found in webhook data");
       return { action: PaymentActions.NOT_SUPPORTED };
     }
-    if (this.debug) this.logger.info(`PS_P_Debug: getWebhookActionAndData returning AUTHORIZED for reference: ${reference}`);
+    
+    const session_id = data.metadata?.session_id;
+    if (!session_id) {
+      if (this.debug) this.logger.error("PS_P_Debug: getWebhookActionAndData no session_id found in webhook metadata");
+      return { action: PaymentActions.NOT_SUPPORTED };
+    }
+
+    const convertedAmount = Number(data.amount) / 100;
+    if (this.debug) {
+      this.logger.info(`PS_P_Debug: getWebhookActionAndData returning SUCCESSFUL for session_id: ${session_id}`);
+      this.logger.info(`PS_P_Debug: Webhook amount conversion - Paystack raw amount: ${data.amount}, Converted standard amount: ${convertedAmount}`);
+    }
     return {
-      action: PaymentActions.AUTHORIZED,
+      action: PaymentActions.SUCCESSFUL,
       data: {
-        session_id: reference, 
-        amount: Math.round(Number(data.amount)),
+        session_id: session_id, 
+        amount: convertedAmount,
       },
     };
   }
