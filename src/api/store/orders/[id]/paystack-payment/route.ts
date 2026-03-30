@@ -73,6 +73,8 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
     // and properly handled by directly invoking the Payment Module.
     const paymentModule = req.scope.resolve(Modules.PAYMENT);
 
+    const { data: paymentProviders } = await query.graph({ entity: "payment_provider", fields: ["id", "is_installed"], });
+    console.log(paymentProviders);
     const paymentSession = await paymentModule.createPaymentSession(paymentCollection.id, {
       provider_id: "paystack", // Corrected to match your processor's static identifier
       amount: requestedAmount,
