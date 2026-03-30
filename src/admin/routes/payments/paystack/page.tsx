@@ -184,7 +184,7 @@ export default function PaystackDashboard() {
         <Table>
           <Table.Header>
             <Table.Row>
-              <Table.HeaderCell>Order No / Ref</Table.HeaderCell>
+              <Table.HeaderCell>Ref No.</Table.HeaderCell>
               <Table.HeaderCell>Date</Table.HeaderCell>
               <Table.HeaderCell>Customer</Table.HeaderCell>
               <Table.HeaderCell>Amount</Table.HeaderCell>
@@ -194,7 +194,7 @@ export default function PaystackDashboard() {
           <Table.Body>
             {payments.map((payment: any) => (
               <Table.Row key={payment.id}>
-                <Table.Cell>#{payment.order_number}</Table.Cell>
+                <Table.Cell className="font-mono text-xs">{payment.reference}</Table.Cell>
                 <Table.Cell>{new Date(payment.date).toLocaleString()}</Table.Cell>
                 <Table.Cell>
                   <div className="flex flex-col">

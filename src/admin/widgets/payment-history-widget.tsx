@@ -14,7 +14,7 @@ const PaymentHistoryWidget = ({ data: order }: { data: any }) => {
         <Table>
           <Table.Header>
             <Table.Row>
-              <Table.HeaderCell>ID</Table.HeaderCell>
+              <Table.HeaderCell>Ref No.</Table.HeaderCell>
               <Table.HeaderCell>Provider</Table.HeaderCell>
               <Table.HeaderCell>Amount</Table.HeaderCell>
               <Table.HeaderCell>Status</Table.HeaderCell>
@@ -22,27 +22,31 @@ const PaymentHistoryWidget = ({ data: order }: { data: any }) => {
             </Table.Row>
           </Table.Header>
           <Table.Body>
-            {payments.map((payment: any) => (
-              <Table.Row key={payment.id}>
-                <Table.Cell className="font-mono text-xs">{payment.id.slice(-8)}</Table.Cell>
-                <Table.Cell>
-                  <Badge size="small" color={payment.provider_id === 'paystack' ? 'blue' : 'grey'}>
-                    {payment.provider_id}
-                  </Badge>
-                </Table.Cell>
-                <Table.Cell>
-                  {new Intl.NumberFormat('en-US', { style: 'currency', currency: payment.currency_code }).format(payment.amount)}
-                </Table.Cell>
-                <Table.Cell>
-                  <Badge size="small" color={payment.captured_at ? 'green' : payment.canceled_at ? 'red' : 'orange'}>
-                    {payment.captured_at ? 'Captured' : payment.canceled_at ? 'Canceled' : 'Pending'}
-                  </Badge>
-                </Table.Cell>
-                <Table.Cell>
-                  {new Date(payment.created_at).toLocaleDateString()}
-                </Table.Cell>
-              </Table.Row>
-            ))}
+            {payments.map((payment: any) => {
+              const reference = payment.data?.paystackTxRef || payment.data?.reference || payment.id.slice(-8);
+              return (
+                <Table.Row key={payment.id}>
+                  {/* Display the extracted reference */}
+                  <Table.Cell className="font-mono text-xs">{reference}</Table.Cell>
+                  <Table.Cell>
+                    <Badge size="small" color={payment.provider_id === 'paystack' ? 'blue' : 'grey'}>
+                      {payment.provider_id}
+                    </Badge>
+                  </Table.Cell>
+                  <Table.Cell>
+                    {new Intl.NumberFormat('en-US', { style: 'currency', currency: payment.currency_code }).format(payment.amount)}
+                  </Table.Cell>
+                  <Table.Cell>
+                    <Badge size="small" color={payment.captured_at ? 'green' : payment.canceled_at ? 'red' : 'orange'}>
+                      {payment.captured_at ? 'Captured' : payment.canceled_at ? 'Canceled' : 'Pending'}
+                    </Badge>
+                  </Table.Cell>
+                  <Table.Cell>
+                    {new Date(payment.created_at).toLocaleDateString()}
+                  </Table.Cell>
+                </Table.Row>
+              );
+            })}
           </Table.Body>
         </Table>
       )}

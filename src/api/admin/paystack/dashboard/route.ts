@@ -123,6 +123,7 @@ export async function GET(req: MedusaRequest, res: MedusaResponse) {
       paymentsList.push({
         id: tx.id,
         order_number: orderNumber,
+        reference: tx.reference,
         date: tx.created_at,
         customer_name: customerName,
         customer_email: tx.customer?.email || "N/A",
