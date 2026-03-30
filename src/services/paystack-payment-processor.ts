@@ -58,9 +58,10 @@ class PaystackPaymentProcessor extends AbstractPaymentProvider<PaystackPaymentPr
   protected readonly paystack: Paystack;
   protected readonly debug: boolean;
   protected readonly logger: Logger;
+  protected readonly orderModuleService: any;
 
   constructor(
-    cradle: { logger: Logger } & Record<string, unknown>,
+    cradle: { logger: Logger; orderModuleService?: any } & Record<string, unknown>,
     options: PaystackPaymentProcessorConfig,
   ) {
     super(cradle, options);
@@ -78,6 +79,7 @@ class PaystackPaymentProcessor extends AbstractPaymentProvider<PaystackPaymentPr
     });
     this.debug = Boolean(options.debug);
     this.logger = cradle.logger;
+    this.orderModuleService = cradle.orderModuleService;
     if (this.debug) {
       this.logger.info("PS_P_Debug: PaystackPaymentProcessor initialized with options: " + JSON.stringify({ disable_retries: options.disable_retries, debug: options.debug }));
     }
@@ -104,7 +106,39 @@ class PaystackPaymentProcessor extends AbstractPaymentProvider<PaystackPaymentPr
       throw new MedusaError(MedusaError.Types.INVALID_ARGUMENT, errorMsg);
     }
     const paystackAmount = Math.round(Number(amount) * 100);
-    const reference = customMetadata?.reference || `TX${Date.now().toString().slice(-8)}${Math.floor(100 + Math.random() * 900)}`;
+    
+    // Standardize reference: Use order_id or cart_id if available, otherwise fallback to random
+    let baseReference = customMetadata?.reference;
+    let displayIdStr = "";
+    
+    if (!baseReference) {
+      if (order_id) {
+        // Try to fetch the order to get the display_id (e.g., #18)
+        try {
+          if (this.orderModuleService) {
+            const order = await this.orderModuleService.retrieveOrder(order_id);
+            if (order && order.display_id) {
+              displayIdStr = `${order.display_id}-`;
+            }
+          }
+        } catch (e) {
+          if (this.debug) this.logger.warn(`PS_P_Debug: Could not fetch order ${order_id} for display_id`);
+        }
+        // Strip the "order_" prefix
+        baseReference = order_id.replace(/^order_/, "");
+      } else if (cart_id) {
+        // Strip the "cart_" prefix
+        baseReference = cart_id.replace(/^cart_/, "");
+      } else {
+        baseReference = `TX${Date.now().toString().slice(-8)}`;
+      }
+    }
+    
+    // Append a short random string to ensure uniqueness even for multiple attempts on the same order/cart
+    // Format: {Display ID}-{Stripped Order/Cart ID}-{4-digit Random}
+    // Example: 18-01J...-1234
+    const reference = customMetadata?.reference || `${displayIdStr}${baseReference}-${Math.floor(1000 + Math.random() * 9000)}`;
+
     if (this.debug) {
       this.logger.info(`PS_P_Debug: initiatePayment initializing transaction with Paystack. Amount: ${paystackAmount}, Currency: ${validatedCurrencyCode}, Reference: ${reference}, Email: ${email}`);
     }
