@@ -102,19 +102,23 @@ const PaymentHistoryWidget = ({ data: order }) => {
     /* @__PURE__ */ jsxRuntime.jsx(ui.Heading, { level: "h2", className: "mb-4", children: "Payment History" }),
     payments.length === 0 ? /* @__PURE__ */ jsxRuntime.jsx(ui.Text, { className: "text-ui-fg-subtle", children: "No payments recorded yet." }) : /* @__PURE__ */ jsxRuntime.jsxs(ui.Table, { children: [
       /* @__PURE__ */ jsxRuntime.jsx(ui.Table.Header, { children: /* @__PURE__ */ jsxRuntime.jsxs(ui.Table.Row, { children: [
-        /* @__PURE__ */ jsxRuntime.jsx(ui.Table.HeaderCell, { children: "ID" }),
+        /* @__PURE__ */ jsxRuntime.jsx(ui.Table.HeaderCell, { children: "Ref No." }),
         /* @__PURE__ */ jsxRuntime.jsx(ui.Table.HeaderCell, { children: "Provider" }),
         /* @__PURE__ */ jsxRuntime.jsx(ui.Table.HeaderCell, { children: "Amount" }),
         /* @__PURE__ */ jsxRuntime.jsx(ui.Table.HeaderCell, { children: "Status" }),
         /* @__PURE__ */ jsxRuntime.jsx(ui.Table.HeaderCell, { children: "Date" })
       ] }) }),
-      /* @__PURE__ */ jsxRuntime.jsx(ui.Table.Body, { children: payments.map((payment) => /* @__PURE__ */ jsxRuntime.jsxs(ui.Table.Row, { children: [
-        /* @__PURE__ */ jsxRuntime.jsx(ui.Table.Cell, { className: "font-mono text-xs", children: payment.id.slice(-8) }),
-        /* @__PURE__ */ jsxRuntime.jsx(ui.Table.Cell, { children: /* @__PURE__ */ jsxRuntime.jsx(ui.Badge, { size: "small", color: payment.provider_id === "paystack" ? "blue" : "grey", children: payment.provider_id }) }),
-        /* @__PURE__ */ jsxRuntime.jsx(ui.Table.Cell, { children: new Intl.NumberFormat("en-US", { style: "currency", currency: payment.currency_code }).format(payment.amount) }),
-        /* @__PURE__ */ jsxRuntime.jsx(ui.Table.Cell, { children: /* @__PURE__ */ jsxRuntime.jsx(ui.Badge, { size: "small", color: payment.captured_at ? "green" : payment.canceled_at ? "red" : "orange", children: payment.captured_at ? "Captured" : payment.canceled_at ? "Canceled" : "Pending" }) }),
-        /* @__PURE__ */ jsxRuntime.jsx(ui.Table.Cell, { children: new Date(payment.created_at).toLocaleDateString() })
-      ] }, payment.id)) })
+      /* @__PURE__ */ jsxRuntime.jsx(ui.Table.Body, { children: payments.map((payment) => {
+        var _a2, _b;
+        const reference = ((_a2 = payment.data) == null ? void 0 : _a2.paystackTxRef) || ((_b = payment.data) == null ? void 0 : _b.reference) || payment.id.slice(-8);
+        return /* @__PURE__ */ jsxRuntime.jsxs(ui.Table.Row, { children: [
+          /* @__PURE__ */ jsxRuntime.jsx(ui.Table.Cell, { className: "font-mono text-xs", children: reference }),
+          /* @__PURE__ */ jsxRuntime.jsx(ui.Table.Cell, { children: /* @__PURE__ */ jsxRuntime.jsx(ui.Badge, { size: "small", color: payment.provider_id === "paystack" ? "blue" : "grey", children: payment.provider_id }) }),
+          /* @__PURE__ */ jsxRuntime.jsx(ui.Table.Cell, { children: new Intl.NumberFormat("en-US", { style: "currency", currency: payment.currency_code }).format(payment.amount) }),
+          /* @__PURE__ */ jsxRuntime.jsx(ui.Table.Cell, { children: /* @__PURE__ */ jsxRuntime.jsx(ui.Badge, { size: "small", color: payment.captured_at ? "green" : payment.canceled_at ? "red" : "orange", children: payment.captured_at ? "Captured" : payment.canceled_at ? "Canceled" : "Pending" }) }),
+          /* @__PURE__ */ jsxRuntime.jsx(ui.Table.Cell, { children: new Date(payment.created_at).toLocaleDateString() })
+        ] }, payment.id);
+      }) })
     ] })
   ] });
 };
@@ -266,7 +270,7 @@ function PaystackDashboard() {
       ] }),
       /* @__PURE__ */ jsxRuntime.jsxs(ui.Table, { children: [
         /* @__PURE__ */ jsxRuntime.jsx(ui.Table.Header, { children: /* @__PURE__ */ jsxRuntime.jsxs(ui.Table.Row, { children: [
-          /* @__PURE__ */ jsxRuntime.jsx(ui.Table.HeaderCell, { children: "Order No / Ref" }),
+          /* @__PURE__ */ jsxRuntime.jsx(ui.Table.HeaderCell, { children: "Ref No." }),
           /* @__PURE__ */ jsxRuntime.jsx(ui.Table.HeaderCell, { children: "Date" }),
           /* @__PURE__ */ jsxRuntime.jsx(ui.Table.HeaderCell, { children: "Customer" }),
           /* @__PURE__ */ jsxRuntime.jsx(ui.Table.HeaderCell, { children: "Amount" }),
@@ -274,10 +278,7 @@ function PaystackDashboard() {
         ] }) }),
         /* @__PURE__ */ jsxRuntime.jsxs(ui.Table.Body, { children: [
           payments.map((payment) => /* @__PURE__ */ jsxRuntime.jsxs(ui.Table.Row, { children: [
-            /* @__PURE__ */ jsxRuntime.jsxs(ui.Table.Cell, { children: [
-              "#",
-              payment.order_number
-            ] }),
+            /* @__PURE__ */ jsxRuntime.jsx(ui.Table.Cell, { className: "font-mono text-xs", children: payment.reference }),
             /* @__PURE__ */ jsxRuntime.jsx(ui.Table.Cell, { children: new Date(payment.date).toLocaleString() }),
             /* @__PURE__ */ jsxRuntime.jsx(ui.Table.Cell, { children: /* @__PURE__ */ jsxRuntime.jsxs("div", { className: "flex flex-col", children: [
               /* @__PURE__ */ jsxRuntime.jsx(ui.Text, { size: "small", weight: "plus", children: payment.customer_name }),
