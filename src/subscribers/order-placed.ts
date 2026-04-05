@@ -42,7 +42,7 @@ export default async function PaystackOrderPlacedHandler({
 
     logger.info(`[Paystack] Checking payments for order: ${orderId}`);
     for (const payment of order.payment_collections[0].payments ||[]) {
-      if (payment.provider_id === "paystack" || payment.provider_id === "pp_paystack") {
+      if (payment.provider_id === "pp_paystack") {
         isPaystackPayment = true;
         logger.info(`[Paystack] Found Paystack payment: ${payment.id} with amount: ${payment.amount}`);
 
@@ -56,7 +56,7 @@ export default async function PaystackOrderPlacedHandler({
             });
             logger.info(`[Paystack] Successfully auto-captured payment ${payment.id} for Order ${orderId}`);
             capturedAmount += Number(payment.amount);
-          } catch (err) {
+          } catch (err: any) {
             logger.error(`[Paystack] Failed to auto-capture payment ${payment.id}:`, err);
             return;
           }
@@ -94,7 +94,7 @@ export default async function PaystackOrderPlacedHandler({
         throwOnError: false,
       });
       logger.info(`[Paystack] Successfully auto-fulfilled Order ${orderId}`);
-    } catch (err) {
+    } catch (err: any) {
       logger.error(`[Paystack] Failed to auto-fulfill Order ${orderId}`, err);
     }
 
@@ -114,13 +114,13 @@ export default async function PaystackOrderPlacedHandler({
           }
         }]);
         logger.info(`[Paystack] Payment confirmation email successfully sent to ${order.email}`);
-      } catch (err) {
+      } catch (err: any) {
         logger.error(`[Paystack] Failed to send email for Order ${orderId}`, err);
       }
     } else {
       logger.warn(`[Paystack] Notification module not found. Skipping email for Order ${orderId}`);
     }
-  } catch (error) {
+  } catch (error: any) {
     logger.error(`[Paystack] Unexpected error in order placed handler for Order ${orderId}`, error);
   }
 }

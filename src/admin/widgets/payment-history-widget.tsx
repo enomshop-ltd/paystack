@@ -29,7 +29,7 @@ const PaymentHistoryWidget = ({ data: order }: { data: any }) => {
                   {/* Display the extracted reference */}
                   <Table.Cell className="font-mono text-xs">{reference}</Table.Cell>
                   <Table.Cell>
-                    <Badge size="small" color={payment.provider_id === 'paystack' || payment.provider_id === 'pp_paystack' ? 'blue' : 'grey'}>
+                    <Badge size="small" color={payment.provider_id === 'pp_paystack' ? 'blue' : 'grey'}>
                       {payment.provider_id}
                     </Badge>
                   </Table.Cell>
