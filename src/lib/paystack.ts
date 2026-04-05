@@ -24,7 +24,7 @@ interface Request {
   method: HTTPMethod;
   headers?: Record<string, string>;
   body?: Record<string, unknown>;
-  query?: Record<string, string>;
+  query?: Record<string, unknown>;
 }
 
 export interface PaystackTransactionAuthorisation {
@@ -50,9 +50,11 @@ export default class Paystack {
     this.apiKey = apiKey;
     this.logger = options?.logger;
     this.debug = options?.debug ?? false;
-    
+
     if (this.debug && this.logger) {
-      this.logger.info(`[Paystack SDK] Initializing Paystack SDK wrapper. Retries disabled: ${options?.disable_retries}`);
+      this.logger.info(
+        `[Paystack SDK] Initializing. Retries disabled: ${options?.disable_retries}`
+      );
     }
 
     this.axiosInstance = axios.create({
@@ -66,9 +68,7 @@ export default class Paystack {
     if (options?.disable_retries !== true) {
       axiosRetry(this.axiosInstance, {
         retries: 3,
-        // Enables retries on network errors, idempotent http methods, and 5xx errors
         retryCondition: axiosRetry.isNetworkOrIdempotentRequestError,
-        // Exponential backoff with jitter
         retryDelay: axiosRetry.exponentialDelay,
       });
     }
@@ -83,31 +83,28 @@ export default class Paystack {
     } satisfies AxiosRequestConfig;
 
     if (this.debug && this.logger) {
-      this.logger.info(`[Paystack SDK] Making API request: ${request.method} ${request.path}`);
-      if (request.query) this.logger.info(`[Paystack SDK] Query: ${JSON.stringify(request.query)}`);
-      if (request.body) this.logger.info(`[Paystack SDK] Body: ${JSON.stringify(request.body)}`);
+      this.logger.info(
+        `[Paystack SDK] ${request.method} ${request.path}`
+      );
     }
 
     try {
       const res = await this.axiosInstance(options);
-      
-      if (this.debug && this.logger) {
-        this.logger.info(`[Paystack SDK] API request successful: ${request.method} ${request.path}`);
-      }
-      
       return res.data;
-    } catch (error) {
+    } catch (error: any) {
       if (axios.isAxiosError(error)) {
-        const axiosError = error as any;
-        const errorMessage = `Error from Paystack API with status code ${axiosError.response?.status}: ${axiosError.response?.data?.message}`;
+        const axiosError = error;
+        const errorMessage = `Error from Paystack API ${axiosError.response?.status}: ${axiosError.response?.data?.message}`;
         if (this.logger) {
           this.logger.error(`[Paystack SDK] ${errorMessage}`, axiosError.response?.data);
         }
         throw new Error(errorMessage);
       }
-
       if (this.logger) {
-        this.logger.error(`[Paystack SDK] Unexpected error during API request: ${request.method} ${request.path}`, error);
+        this.logger.error(
+          `[Paystack SDK] Unexpected error: ${request.method} ${request.path}`,
+          error
+        );
       }
       throw error;
     }
@@ -126,30 +123,13 @@ export default class Paystack {
         method: "GET",
       }),
     list: (query?: { perPage?: number; page?: number; status?: string }) =>
-      this.requestPaystackAPI<
-        PaystackResponse<Array<{
-          id: number;
-          status: string;
-          reference: string;
-          amount: number;
-          currency: string;
-          created_at: string;
-          customer: {
-            first_name: string | null;
-            last_name: string | null;
-            email: string;
-          };
-          metadata: any;
-        }>>
-      >({
+      this.requestPaystackAPI<PaystackResponse<Record<string, unknown>[]>>({
         path: "/transaction",
         method: "GET",
-        query: query as Record<string, string>,
+        query: query as Record<string, unknown>,
       }),
     balance: () =>
-      this.requestPaystackAPI<
-        PaystackResponse<Array<{ currency: string; balance: number }>>
-      >({
+      this.requestPaystackAPI<PaystackResponse<Record<string, unknown>[]>>({
         path: "/balance",
         method: "GET",
       }),
@@ -265,7 +245,7 @@ export default class Paystack {
       >({
         path: "/customer",
         method: "POST",
-        body: data as Record<string, unknown>, // Cast to match your Request interface expectations
+        body: data as Record<string, unknown>,
       }),
 
     update: (

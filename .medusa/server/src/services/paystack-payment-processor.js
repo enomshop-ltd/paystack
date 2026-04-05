@@ -7,9 +7,9 @@ const crypto_1 = __importDefault(require("crypto"));
 const paystack_1 = __importDefault(require("../lib/paystack"));
 const utils_1 = require("@medusajs/framework/utils");
 const currencyCode_1 = require("../utils/currencyCode");
+const SUPPORTED_CURRENCIES = ["NGN", "GHS", "ZAR", "USD", "KES", "EGP", "RWF"];
 class PaystackPaymentProcessor extends utils_1.AbstractPaymentProvider {
-    constructor(cradle, // Update cradle injection
-    options) {
+    constructor(cradle, options) {
         super(cradle, options);
         if (!options.secret_key) {
             throw new utils_1.MedusaError(utils_1.MedusaError.Types.INVALID_ARGUMENT, "The Paystack provider requires the secret_key option");
@@ -22,9 +22,10 @@ class PaystackPaymentProcessor extends utils_1.AbstractPaymentProvider {
         });
         this.debug = Boolean(options.debug);
         this.logger = cradle.logger;
-        this.query = cradle.query; // ADD THIS LINE
+        this.query = cradle.query;
         if (this.debug) {
-            this.logger.info("PS_P_Debug: PaystackPaymentProcessor initialized with options: " + JSON.stringify({ disable_retries: options.disable_retries, debug: options.debug }));
+            this.logger.info("PS_P_Debug: PaystackPaymentProcessor initialized with options: " +
+                JSON.stringify({ disable_retries: options.disable_retries, debug: options.debug }));
         }
     }
     async initiatePayment(initiatePaymentData) {
@@ -34,9 +35,8 @@ class PaystackPaymentProcessor extends utils_1.AbstractPaymentProvider {
         const { data, amount, currency_code } = initiatePaymentData;
         const { email, session_id, order_id, cart_id, callback_url, ...customMetadata } = (data ?? {});
         const validatedCurrencyCode = (0, currencyCode_1.formatCurrencyCode)(currency_code);
-        const SUPPORTED_CURRENCIES = ["NGN", "GHS", "ZAR", "USD", "KES", "EGP", "RWF"];
         if (!SUPPORTED_CURRENCIES.includes(validatedCurrencyCode)) {
-            const errorMsg = `Currency ${validatedCurrencyCode} is not supported by Paystack. Supported currencies are: ${SUPPORTED_CURRENCIES.join(", ")}`;
+            const errorMsg = `Currency ${validatedCurrencyCode} is not supported by Paystack. Supported: ${SUPPORTED_CURRENCIES.join(", ")}`;
             if (this.debug)
                 this.logger.error(`PS_P_Debug: initiatePayment error: ${errorMsg}`);
             throw new utils_1.MedusaError(utils_1.MedusaError.Types.INVALID_DATA, errorMsg);
@@ -47,19 +47,19 @@ class PaystackPaymentProcessor extends utils_1.AbstractPaymentProvider {
                 this.logger.error(`PS_P_Debug: initiatePayment error: ${errorMsg}`);
             throw new utils_1.MedusaError(utils_1.MedusaError.Types.INVALID_ARGUMENT, errorMsg);
         }
-        const paystackAmount = Math.round(Number(amount) * 100);
-        // Standardize reference: Use order_id or cart_id if available, otherwise fallback to random
+        // FIX: Medusa already passes amounts in the lowest denomination (kobo/cents).
+        // Do NOT multiply by 100 — that would result in 100x overcharges.
+        const paystackAmount = Math.round(Number(amount));
         let baseReference = customMetadata?.reference;
         let displayIdStr = "";
         if (!baseReference) {
             if (order_id) {
-                // Try to fetch the order to get the display_id (e.g., #18)
                 try {
                     if (this.query) {
                         const { data: orders } = await this.query.graph({
                             entity: "order",
                             fields: ["display_id"],
-                            filters: { id: order_id }
+                            filters: { id: order_id },
                         });
                         if (orders && orders.length > 0 && orders[0].display_id) {
                             displayIdStr = `${orders[0].display_id}-`;
@@ -70,19 +70,16 @@ class PaystackPaymentProcessor extends utils_1.AbstractPaymentProvider {
                     if (this.debug)
                         this.logger.warn(`PS_P_Debug: Could not fetch order ${order_id} for display_id`);
                 }
-                // Strip the "order_" prefix
                 baseReference = order_id.replace(/^order_/, "");
             }
             else if (cart_id) {
                 baseReference = `TX${Date.now().toString().slice(-8)}`;
             }
         }
-        // Append a short random string to ensure uniqueness even for multiple attempts on the same order/cart
-        // Format: {Display ID}-{Stripped Order/Cart ID}-{4-digit Random}
-        // Example: 18-01J...-1234
-        const reference = customMetadata?.reference || `${displayIdStr}${baseReference}-${Math.floor(1000 + Math.random() * 9000)}`;
+        const reference = customMetadata?.reference ||
+            `${displayIdStr}${baseReference}-${Math.floor(1000 + Math.random() * 9000)}`;
         if (this.debug) {
-            this.logger.info(`PS_P_Debug: initiatePayment initializing transaction with Paystack. Amount: ${paystackAmount}, Currency: ${validatedCurrencyCode}, Reference: ${reference}, Email: ${email}`);
+            this.logger.info(`PS_P_Debug: initiatePayment initializing. Amount: ${paystackAmount}, Currency: ${validatedCurrencyCode}, Ref: ${reference}`);
         }
         try {
             const { data: psData, status, message, } = await this.paystack.transaction.initialize({
@@ -99,14 +96,13 @@ class PaystackPaymentProcessor extends utils_1.AbstractPaymentProvider {
                 },
             });
             if (this.debug) {
-                this.logger.info(`PS_P_Debug: initiatePayment Paystack response status: ${status}, message: ${message}, data: ${JSON.stringify(psData, null, 2)}`);
+                this.logger.info(`PS_P_Debug: initiatePayment Paystack response status: ${status}, message: ${message}`);
             }
             if (status === false) {
                 throw new utils_1.MedusaError(utils_1.MedusaError.Types.UNEXPECTED_STATE, "Failed to initiate Paystack payment", message);
             }
             return {
                 id: psData.reference,
-                status: utils_1.PaymentSessionStatus.PENDING,
                 data: {
                     paystackTxRef: psData.reference,
                     paystackTxAccessCode: psData.access_code,
@@ -125,25 +121,20 @@ class PaystackPaymentProcessor extends utils_1.AbstractPaymentProvider {
         if (this.debug) {
             this.logger.info(`PS_P_Debug: createAccountHolder called with input: ${JSON.stringify(input, null, 2)}`);
         }
-        const { customer } = input.context || {};
+        const { customer } = (input.context ?? {});
         if (!customer?.email) {
             const mockId = `ps_mock_${Date.now()}`;
             if (this.debug)
-                this.logger.info(`PS_P_Debug: createAccountHolder no email provided, returning mock ID: ${mockId}`);
+                this.logger.info(`PS_P_Debug: createAccountHolder no email, returning mock ID: ${mockId}`);
             return { id: mockId };
         }
         try {
-            if (this.debug)
-                this.logger.info(`PS_P_Debug: createAccountHolder creating customer with Paystack for email: ${customer.email}`);
             const { data, status, message } = await this.paystack.customer.create({
                 email: customer.email,
                 first_name: customer.first_name ?? undefined,
                 last_name: customer.last_name ?? undefined,
                 phone: customer.phone ?? undefined,
             });
-            if (this.debug) {
-                this.logger.info(`PS_P_Debug: createAccountHolder Paystack response status: ${status}, message: ${message}, data: ${JSON.stringify(data, null, 2)}`);
-            }
             if (status === false) {
                 throw new utils_1.MedusaError(utils_1.MedusaError.Types.UNEXPECTED_STATE, message || "Paystack API Error");
             }
@@ -157,260 +148,141 @@ class PaystackPaymentProcessor extends utils_1.AbstractPaymentProvider {
         }
     }
     async updateAccountHolder(input) {
-        if (this.debug) {
-            this.logger.info(`PS_P_Debug: updateAccountHolder called with input: ${JSON.stringify(input, null, 2)}`);
-        }
-        const { account_holder, customer } = input.context || {};
+        const { account_holder, customer } = (input.context ?? {});
         const customerCode = account_holder?.data?.id;
         if (!customerCode || !customerCode.startsWith("CUS_") || !customer) {
-            const returnId = customerCode || `ps_mock_${Date.now()}`;
-            if (this.debug)
-                this.logger.info(`PS_P_Debug: updateAccountHolder invalid customer code or no customer data, returning ID: ${returnId}`);
-            return { id: returnId };
+            return { id: customerCode || `ps_mock_${Date.now()}` };
         }
         try {
-            if (this.debug)
-                this.logger.info(`PS_P_Debug: updateAccountHolder updating customer ${customerCode} with Paystack`);
             const { status, message } = await this.paystack.customer.update(customerCode, {
                 first_name: customer.first_name ?? undefined,
                 last_name: customer.last_name ?? undefined,
                 phone: customer.phone ?? undefined,
             });
-            if (this.debug) {
-                this.logger.info(`PS_P_Debug: updateAccountHolder Paystack response status: ${status}, message: ${message}`);
-            }
-            if (status === false) {
-                if (this.debug) {
-                    this.logger.error(`PS_P_Debug: updateAccountHolder API Error: ${message}`);
-                }
+            if (status === false && this.debug) {
+                this.logger.error(`PS_P_Debug: updateAccountHolder API Error: ${message}`);
             }
             return { id: customerCode };
         }
         catch (error) {
-            if (this.debug) {
-                this.logger.error("PS_P_Debug: updateAccountHolder caught error", error);
-            }
             return { id: customerCode };
         }
     }
-    async deleteAccountHolder(input) {
-        if (this.debug) {
-            this.logger.info(`PS_P_Debug: deleteAccountHolder called with input: ${JSON.stringify(input, null, 2)} (No-op)`);
-        }
+    async deleteAccountHolder(_input) {
         return;
     }
     async updatePayment(input) {
         if (this.debug) {
-            this.logger.info(`PS_P_Debug: updatePayment called with input: ${JSON.stringify(input, null, 2)}`);
-        }
-        if (this.debug)
             this.logger.info("PS_P_Debug: updatePayment delegating to initiatePayment");
+        }
         const session = await this.initiatePayment(input);
-        if (this.debug)
-            this.logger.info(`PS_P_Debug: updatePayment returning session status: ${session.status}`);
         return {
             data: session.data,
-            status: session.status,
         };
     }
     async authorizePayment(input) {
-        if (this.debug) {
-            this.logger.info(`PS_P_Debug: authorizePayment called with input: ${JSON.stringify(input, null, 2)}`);
-        }
         try {
             const { paystackTxRef } = input.data;
             if (!paystackTxRef) {
-                const errorMsg = "Missing paystackTxRef in payment data.";
-                if (this.debug)
-                    this.logger.error(`PS_P_Debug: authorizePayment error: ${errorMsg}`);
-                throw new utils_1.MedusaError(utils_1.MedusaError.Types.INVALID_DATA, errorMsg);
+                throw new utils_1.MedusaError(utils_1.MedusaError.Types.INVALID_DATA, "Missing paystackTxRef in payment data.");
             }
-            if (this.debug)
-                this.logger.info(`PS_P_Debug: authorizePayment verifying transaction ${paystackTxRef} with Paystack`);
             const { status: psStatus, data } = await this.paystack.transaction.verify(paystackTxRef);
-            if (this.debug) {
-                this.logger.info(`PS_P_Debug: authorizePayment Paystack verification response status: ${psStatus}, data: ${JSON.stringify(data, null, 2)}`);
-            }
             if (psStatus === false) {
-                if (this.debug)
-                    this.logger.warn("PS_P_Debug: authorizePayment Paystack verification returned false status");
                 return {
                     status: utils_1.PaymentSessionStatus.ERROR,
-                    data: {
-                        ...input.data,
-                        paystackTxId: data.id,
-                        paystackTxData: data,
-                    },
+                    data: { ...input.data, paystackTxId: data.id, paystackTxData: data },
                 };
             }
             switch (data.status) {
                 case "success":
-                    if (this.debug)
-                        this.logger.info("PS_P_Debug: authorizePayment transaction successful, returning CAPTURED status");
                     return {
                         status: utils_1.PaymentSessionStatus.CAPTURED,
-                        data: {
-                            ...input.data,
-                            paystackTxId: data.id,
-                            paystackTxData: data,
-                        },
+                        data: { ...input.data, paystackTxId: data.id, paystackTxData: data },
                     };
                 case "failed":
-                    if (this.debug)
-                        this.logger.info("PS_P_Debug: authorizePayment transaction failed, returning ERROR status");
                     return {
                         status: utils_1.PaymentSessionStatus.ERROR,
-                        data: {
-                            ...input.data,
-                            paystackTxId: data.id,
-                            paystackTxData: data,
-                        },
+                        data: { ...input.data, paystackTxId: data.id, paystackTxData: data },
                     };
                 default:
-                    if (this.debug)
-                        this.logger.info(`PS_P_Debug: authorizePayment transaction status is ${data.status}, returning PENDING status`);
                     return {
                         status: utils_1.PaymentSessionStatus.PENDING,
-                        data: {
-                            ...input.data,
-                            paystackTxId: data.id,
-                            paystackTxData: data,
-                        },
+                        data: { ...input.data, paystackTxId: data.id, paystackTxData: data },
                     };
             }
         }
         catch (error) {
-            if (this.debug) {
-                this.logger.error("PS_P_Debug: authorizePayment caught error", error);
-            }
             throw new utils_1.MedusaError(utils_1.MedusaError.Types.UNEXPECTED_STATE, "Failed to authorize payment", error?.toString() ?? "Unknown error");
         }
     }
     async retrievePayment(input) {
-        if (this.debug) {
-            this.logger.info(`PS_P_Debug: retrievePayment called with input: ${JSON.stringify(input, null, 2)}`);
-        }
         try {
             const { paystackTxId } = input.data;
             if (!paystackTxId) {
-                const errorMsg = "Missing paystackTxId in payment data. This payment has not been authorized.";
-                if (this.debug)
-                    this.logger.error(`PS_P_Debug: retrievePayment error: ${errorMsg}`);
-                throw new utils_1.MedusaError(utils_1.MedusaError.Types.INVALID_DATA, errorMsg);
+                throw new utils_1.MedusaError(utils_1.MedusaError.Types.INVALID_DATA, "Missing paystackTxId in payment data. This payment has not been authorized.");
             }
-            if (this.debug)
-                this.logger.info(`PS_P_Debug: retrievePayment fetching transaction ${paystackTxId} from Paystack`);
-            const { data, status, message } = await this.paystack.transaction.get({ id: paystackTxId });
-            if (this.debug) {
-                this.logger.info(`PS_P_Debug: retrievePayment Paystack response status: ${status}, message: ${message}, data: ${JSON.stringify(data, null, 2)}`);
-            }
+            const { data, status, message } = await this.paystack.transaction.get({
+                id: paystackTxId,
+            });
             if (status === false) {
                 throw new utils_1.MedusaError(utils_1.MedusaError.Types.UNEXPECTED_STATE, "Failed to retrieve payment", message);
             }
-            return {
-                data: {
-                    ...input.data,
-                    paystackTxData: data,
-                },
-            };
+            return { data: { ...input.data, paystackTxData: data } };
         }
         catch (error) {
-            if (this.debug) {
-                this.logger.error("PS_P_Debug: retrievePayment caught error", error);
-            }
             throw new utils_1.MedusaError(utils_1.MedusaError.Types.UNEXPECTED_STATE, "Failed to retrieve payment", error?.toString() ?? "Unknown error");
         }
     }
     async refundPayment(input) {
-        if (this.debug) {
-            this.logger.info(`PS_P_Debug: refundPayment called with input: ${JSON.stringify(input, null, 2)}`);
-        }
         try {
             const { paystackTxId } = input.data;
             if (!paystackTxId) {
-                const errorMsg = "Missing paystackTxId in payment data.";
-                if (this.debug)
-                    this.logger.error(`PS_P_Debug: refundPayment error: ${errorMsg}`);
-                throw new utils_1.MedusaError(utils_1.MedusaError.Types.INVALID_DATA, errorMsg);
+                throw new utils_1.MedusaError(utils_1.MedusaError.Types.INVALID_DATA, "Missing paystackTxId in payment data.");
             }
-            const refundAmount = Math.round(Number(input.amount) * 100);
-            if (this.debug)
-                this.logger.info(`PS_P_Debug: refundPayment initiating refund with Paystack for transaction ${paystackTxId}, amount: ${refundAmount}`);
+            // FIX: Medusa passes the refund amount already in the lowest denomination.
+            // Do NOT multiply by 100.
+            const refundAmount = Math.round(Number(input.amount));
             const { data, status, message } = await this.paystack.refund.create({
                 transaction: paystackTxId,
                 amount: refundAmount,
             });
-            if (this.debug) {
-                this.logger.info(`PS_P_Debug: refundPayment Paystack response status: ${status}, message: ${message}, data: ${JSON.stringify(data, null, 2)}`);
-            }
             if (status === false) {
                 throw new utils_1.MedusaError(utils_1.MedusaError.Types.UNEXPECTED_STATE, "Failed to refund payment", message);
             }
-            return {
-                data: {
-                    ...input.data,
-                    paystackTxData: data,
-                },
-            };
+            return { data: { ...input.data, paystackTxData: data } };
         }
         catch (error) {
-            if (this.debug) {
-                this.logger.error("PS_P_Debug: refundPayment caught error", error);
-            }
             throw new utils_1.MedusaError(utils_1.MedusaError.Types.UNEXPECTED_STATE, "Failed to refund payment", error?.toString() ?? "Unknown error");
         }
     }
     async getPaymentStatus(input) {
-        if (this.debug) {
-            this.logger.info(`PS_P_Debug: getPaymentStatus called with input: ${JSON.stringify(input, null, 2)}`);
-        }
         const { paystackTxId } = input.data;
         if (!paystackTxId) {
-            if (this.debug)
-                this.logger.info("PS_P_Debug: getPaymentStatus no paystackTxId found, returning PENDING");
             return { status: utils_1.PaymentSessionStatus.PENDING };
         }
         try {
-            if (this.debug)
-                this.logger.info(`PS_P_Debug: getPaymentStatus fetching transaction ${paystackTxId} from Paystack`);
-            const { data, status } = await this.paystack.transaction.get({ id: paystackTxId });
-            if (this.debug) {
-                this.logger.info(`PS_P_Debug: getPaymentStatus Paystack response status: ${status}, data: ${JSON.stringify(data, null, 2)}`);
-            }
+            const { data, status } = await this.paystack.transaction.get({
+                id: paystackTxId,
+            });
             if (status === false) {
-                if (this.debug)
-                    this.logger.warn("PS_P_Debug: getPaymentStatus Paystack returned false status, returning ERROR");
                 return { status: utils_1.PaymentSessionStatus.ERROR };
             }
             switch (data?.status) {
                 case "success":
-                    if (this.debug)
-                        this.logger.info("PS_P_Debug: getPaymentStatus transaction successful, returning CAPTURED");
                     return { status: utils_1.PaymentSessionStatus.CAPTURED };
                 case "failed":
-                    if (this.debug)
-                        this.logger.info("PS_P_Debug: getPaymentStatus transaction failed, returning ERROR");
                     return { status: utils_1.PaymentSessionStatus.ERROR };
                 default:
-                    if (this.debug)
-                        this.logger.info(`PS_P_Debug: getPaymentStatus transaction status is ${data?.status}, returning PENDING`);
                     return { status: utils_1.PaymentSessionStatus.PENDING };
             }
         }
         catch (error) {
-            if (this.debug) {
-                this.logger.error("PS_P_Debug: getPaymentStatus caught error", error);
-            }
             return { status: utils_1.PaymentSessionStatus.ERROR };
         }
     }
     async getWebhookActionAndData({ data: { event, data }, rawData, headers, }) {
-        if (this.debug) {
-            this.logger.info(`PS_P_Debug: getWebhookActionAndData called for event: ${event}, reference: ${data?.reference}`);
-        }
-        const webhookSecretKey = this.configuration.secret_key;
         const hash = crypto_1.default
-            .createHmac("sha512", webhookSecretKey)
+            .createHmac("sha512", this.configuration.secret_key)
             .update(rawData)
             .digest("hex");
         if (hash !== headers["x-paystack-signature"]) {
@@ -419,54 +291,71 @@ class PaystackPaymentProcessor extends utils_1.AbstractPaymentProvider {
             return { action: utils_1.PaymentActions.NOT_SUPPORTED };
         }
         if (event !== "charge.success") {
-            if (this.debug)
-                this.logger.info(`PS_P_Debug: getWebhookActionAndData ignoring event type: ${event}`);
             return { action: utils_1.PaymentActions.NOT_SUPPORTED };
         }
         const reference = data.reference;
         if (!reference) {
-            if (this.debug)
-                this.logger.error("PS_P_Debug: getWebhookActionAndData no reference found in webhook data");
             return { action: utils_1.PaymentActions.NOT_SUPPORTED };
         }
-        const session_id = data.metadata?.session_id;
+        // Primary: session_id injected into Paystack metadata at transaction init time
+        let session_id = data.metadata?.session_id;
+        // Fallback: for partial payments or legacy sessions where session_id wasn't
+        // forwarded into Paystack metadata, look up the payment session by reference
+        // stored in its data field (paystackTxRef).
+        if (!session_id && this.query) {
+            try {
+                const { data: sessions } = await this.query.graph({
+                    entity: "payment_session",
+                    fields: ["id", "data"],
+                    filters: {
+                        provider_id: "pp_paystack",
+                    },
+                });
+                const matched = sessions?.find((s) => s.data?.paystackTxRef === reference);
+                if (matched) {
+                    session_id = matched.id;
+                    if (this.debug) {
+                        this.logger.info(`PS_P_Debug: getWebhookActionAndData resolved session_id ${session_id} via reference lookup for ref: ${reference}`);
+                    }
+                }
+            }
+            catch (e) {
+                if (this.debug) {
+                    this.logger.warn(`PS_P_Debug: getWebhookActionAndData reference lookup failed: ${e}`);
+                }
+            }
+        }
         if (!session_id) {
-            if (this.debug)
-                this.logger.error("PS_P_Debug: getWebhookActionAndData no session_id found in webhook metadata");
+            if (this.debug) {
+                this.logger.error(`PS_P_Debug: getWebhookActionAndData could not resolve session_id for ref: ${reference}`);
+            }
             return { action: utils_1.PaymentActions.NOT_SUPPORTED };
         }
-        const convertedAmount = Number(data.amount) / 100;
+        // FIX: Medusa requires `amount` to be a BigNumber instance, not a plain number.
+        // Also do NOT divide by 100 — Paystack sends amounts in the lowest denomination,
+        // which matches what Medusa expects to store.
+        const amount = new utils_1.BigNumber(data.amount);
         if (this.debug) {
-            this.logger.info(`PS_P_Debug: getWebhookActionAndData returning SUCCESSFUL for session_id: ${session_id}`);
-            this.logger.info(`PS_P_Debug: Webhook amount conversion - Paystack raw amount: ${data.amount}, Converted standard amount: ${convertedAmount}`);
+            this.logger.info(`PS_P_Debug: getWebhookActionAndData SUCCESSFUL for session_id: ${session_id}, amount: ${data.amount}`);
         }
         return {
             action: utils_1.PaymentActions.SUCCESSFUL,
             data: {
-                session_id: session_id,
-                amount: convertedAmount,
+                session_id,
+                amount,
             },
         };
     }
     async capturePayment(input) {
-        if (this.debug) {
-            this.logger.info(`PS_P_Debug: capturePayment called with input: ${JSON.stringify(input, null, 2)} (No-op)`);
-        }
         return { data: input.data };
     }
     async cancelPayment(input) {
-        if (this.debug) {
-            this.logger.info(`PS_P_Debug: cancelPayment called with input: ${JSON.stringify(input, null, 2)} (No-op)`);
-        }
         return { data: input.data };
     }
     async deletePayment(input) {
-        if (this.debug) {
-            this.logger.info(`PS_P_Debug: deletePayment called with input: ${JSON.stringify(input, null, 2)} (No-op)`);
-        }
         return { data: input.data };
     }
 }
 PaystackPaymentProcessor.identifier = "paystack";
 exports.default = PaystackPaymentProcessor;
-//# sourceMappingURL=data:application/json;base64,eyJ2ZXJzaW9uIjozLCJmaWxlIjoicGF5c3RhY2stcGF5bWVudC1wcm9jZXNzb3IuanMiLCJzb3VyY2VSb290IjoiIiwic291cmNlcyI6WyIuLi8uLi8uLi8uLi9zcmMvc2VydmljZXMvcGF5c3RhY2stcGF5bWVudC1wcm9jZXNzb3IudHMiXSwibmFtZXMiOltdLCJtYXBwaW5ncyI6Ijs7Ozs7QUFBQSxvREFBNEI7QUFDNUIsK0RBQXVDO0FBMEJ2QyxxREFLbUM7QUFDbkMsd0RBQTJEO0FBcUIzRCxNQUFNLHdCQUF5QixTQUFRLCtCQUF1RDtJQVE1RixZQUNFLE1BQWdFLEVBQUUsMEJBQTBCO0lBQzVGLE9BQXVDO1FBRXZDLEtBQUssQ0FBQyxNQUFNLEVBQUUsT0FBTyxDQUFDLENBQUM7UUFDdkIsSUFBSSxDQUFDLE9BQU8sQ0FBQyxVQUFVLEVBQUUsQ0FBQztZQUN4QixNQUFNLElBQUksbUJBQVcsQ0FDbkIsbUJBQVcsQ0FBQyxLQUFLLENBQUMsZ0JBQWdCLEVBQ2xDLHNEQUFzRCxDQUN2RCxDQUFDO1FBQ0osQ0FBQztRQUNELElBQUksQ0FBQyxhQUFhLEdBQUcsT0FBTyxDQUFDO1FBQzdCLElBQUksQ0FBQyxRQUFRLEdBQUcsSUFBSSxrQkFBUSxDQUFDLElBQUksQ0FBQyxhQUFhLENBQUMsVUFBVSxFQUFFO1lBQzFELGVBQWUsRUFBRSxPQUFPLENBQUMsZUFBZTtZQUN4QyxNQUFNLEVBQUUsTUFBTSxDQUFDLE1BQU07WUFDckIsS0FBSyxFQUFFLE9BQU8sQ0FBQyxPQUFPLENBQUMsS0FBSyxDQUFDO1NBQzlCLENBQUMsQ0FBQztRQUNILElBQUksQ0FBQyxLQUFLLEdBQUcsT0FBTyxDQUFDLE9BQU8sQ0FBQyxLQUFLLENBQUMsQ0FBQztRQUNwQyxJQUFJLENBQUMsTUFBTSxHQUFHLE1BQU0sQ0FBQyxNQUFNLENBQUM7UUFDNUIsSUFBSSxDQUFDLEtBQUssR0FBRyxNQUFNLENBQUMsS0FBSyxDQUFDLENBQUMsZ0JBQWdCO1FBQzNDLElBQUksSUFBSSxDQUFDLEtBQUssRUFBRSxDQUFDO1lBQ2YsSUFBSSxDQUFDLE1BQU0sQ0FBQyxJQUFJLENBQUMsaUVBQWlFLEdBQUcsSUFBSSxDQUFDLFNBQVMsQ0FBQyxFQUFFLGVBQWUsRUFBRSxPQUFPLENBQUMsZUFBZSxFQUFFLEtBQUssRUFBRSxPQUFPLENBQUMsS0FBSyxFQUFFLENBQUMsQ0FBQyxDQUFDO1FBQzNLLENBQUM7SUFDSCxDQUFDO0lBRUQsS0FBSyxDQUFDLGVBQWUsQ0FDbkIsbUJBQXlDO1FBRXpDLElBQUksSUFBSSxDQUFDLEtBQUssRUFBRSxDQUFDO1lBQ2YsSUFBSSxDQUFDLE1BQU0sQ0FBQyxJQUFJLENBQUMsa0RBQWtELElBQUksQ0FBQyxTQUFTLENBQUMsbUJBQW1CLEVBQUUsSUFBSSxFQUFFLENBQUMsQ0FBQyxFQUFFLENBQUMsQ0FBQztRQUNySCxDQUFDO1FBQ0QsTUFBTSxFQUFFLElBQUksRUFBRSxNQUFNLEVBQUUsYUFBYSxFQUFFLEdBQUcsbUJBQW1CLENBQUM7UUFDNUQsTUFBTSxFQUFFLEtBQUssRUFBRSxVQUFVLEVBQUUsUUFBUSxFQUFFLE9BQU8sRUFBRSxZQUFZLEVBQUUsR0FBRyxjQUFjLEVBQUUsR0FBRyxDQUFDLElBQUksSUFBSSxFQUFFLENBQVEsQ0FBQztRQUN0RyxNQUFNLHFCQUFxQixHQUFHLElBQUEsaUNBQWtCLEVBQUMsYUFBYSxDQUFDLENBQUM7UUFDaEUsTUFBTSxvQkFBb0IsR0FBRyxDQUFDLEtBQUssRUFBRSxLQUFLLEVBQUUsS0FBSyxFQUFFLEtBQUssRUFBRSxLQUFLLEVBQUUsS0FBSyxFQUFFLEtBQUssQ0FBQyxDQUFDO1FBQy9FLElBQUksQ0FBQyxvQkFBb0IsQ0FBQyxRQUFRLENBQUMscUJBQXFCLENBQUMsRUFBRSxDQUFDO1lBQzFELE1BQU0sUUFBUSxHQUFHLFlBQVkscUJBQXFCLDREQUE0RCxvQkFBb0IsQ0FBQyxJQUFJLENBQUMsSUFBSSxDQUFDLEVBQUUsQ0FBQztZQUNoSixJQUFJLElBQUksQ0FBQyxLQUFLO2dCQUFFLElBQUksQ0FBQyxNQUFNLENBQUMsS0FBSyxDQUFDLHNDQUFzQyxRQUFRLEVBQUUsQ0FBQyxDQUFDO1lBQ3BGLE1BQU0sSUFBSSxtQkFBVyxDQUFDLG1CQUFXLENBQUMsS0FBSyxDQUFDLFlBQVksRUFBRSxRQUFRLENBQUMsQ0FBQztRQUNsRSxDQUFDO1FBQ0QsSUFBSSxDQUFDLEtBQUssRUFBRSxDQUFDO1lBQ1gsTUFBTSxRQUFRLEdBQUcsNEtBQTRLLENBQUM7WUFDOUwsSUFBSSxJQUFJLENBQUMsS0FBSztnQkFBRSxJQUFJLENBQUMsTUFBTSxDQUFDLEtBQUssQ0FBQyxzQ0FBc0MsUUFBUSxFQUFFLENBQUMsQ0FBQztZQUNwRixNQUFNLElBQUksbUJBQVcsQ0FBQyxtQkFBVyxDQUFDLEtBQUssQ0FBQyxnQkFBZ0IsRUFBRSxRQUFRLENBQUMsQ0FBQztRQUN0RSxDQUFDO1FBQ0QsTUFBTSxjQUFjLEdBQUcsSUFBSSxDQUFDLEtBQUssQ0FBQyxNQUFNLENBQUMsTUFBTSxDQUFDLEdBQUcsR0FBRyxDQUFDLENBQUM7UUFFeEQsNEZBQTRGO1FBQzVGLElBQUksYUFBYSxHQUFHLGNBQWMsRUFBRSxTQUFTLENBQUM7UUFDOUMsSUFBSSxZQUFZLEdBQUcsRUFBRSxDQUFDO1FBRXRCLElBQUksQ0FBQyxhQUFhLEVBQUUsQ0FBQztZQUNuQixJQUFJLFFBQVEsRUFBRSxDQUFDO2dCQUNiLDJEQUEyRDtnQkFDM0QsSUFBSSxDQUFDO29CQUNILElBQUksSUFBSSxDQUFDLEtBQUssRUFBRSxDQUFDO3dCQUNmLE1BQU0sRUFBRSxJQUFJLEVBQUUsTUFBTSxFQUFFLEdBQUcsTUFBTSxJQUFJLENBQUMsS0FBSyxDQUFDLEtBQUssQ0FBQzs0QkFDOUMsTUFBTSxFQUFFLE9BQU87NEJBQ2YsTUFBTSxFQUFFLENBQUMsWUFBWSxDQUFDOzRCQUN0QixPQUFPLEVBQUUsRUFBRSxFQUFFLEVBQUUsUUFBUSxFQUFFO3lCQUMxQixDQUFDLENBQUM7d0JBRUgsSUFBSSxNQUFNLElBQUksTUFBTSxDQUFDLE1BQU0sR0FBRyxDQUFDLElBQUksTUFBTSxDQUFDLENBQUMsQ0FBQyxDQUFDLFVBQVUsRUFBRSxDQUFDOzRCQUN4RCxZQUFZLEdBQUcsR0FBRyxNQUFNLENBQUMsQ0FBQyxDQUFDLENBQUMsVUFBVSxHQUFHLENBQUM7d0JBQzVDLENBQUM7b0JBQ0gsQ0FBQztnQkFDSCxDQUFDO2dCQUFDLE9BQU8sQ0FBQyxFQUFFLENBQUM7b0JBQ1gsSUFBSSxJQUFJLENBQUMsS0FBSzt3QkFBRSxJQUFJLENBQUMsTUFBTSxDQUFDLElBQUksQ0FBQyxxQ0FBcUMsUUFBUSxpQkFBaUIsQ0FBQyxDQUFDO2dCQUNuRyxDQUFDO2dCQUNELDRCQUE0QjtnQkFDNUIsYUFBYSxHQUFJLFFBQW1CLENBQUMsT0FBTyxDQUFDLFNBQVMsRUFBRSxFQUFFLENBQUMsQ0FBQztZQUM5RCxDQUFDO2lCQUFNLElBQUksT0FBTyxFQUFFLENBQUM7Z0JBQ25CLGFBQWEsR0FBRyxLQUFLLElBQUksQ0FBQyxHQUFHLEVBQUUsQ0FBQyxRQUFRLEVBQUUsQ0FBQyxLQUFLLENBQUMsQ0FBQyxDQUFDLENBQUMsRUFBRSxDQUFDO1lBQ3pELENBQUM7UUFDSCxDQUFDO1FBRUQsc0dBQXNHO1FBQ3RHLGlFQUFpRTtRQUNqRSwwQkFBMEI7UUFDMUIsTUFBTSxTQUFTLEdBQUcsY0FBYyxFQUFFLFNBQVMsSUFBSSxHQUFHLFlBQVksR0FBRyxhQUFhLElBQUksSUFBSSxDQUFDLEtBQUssQ0FBQyxJQUFJLEdBQUcsSUFBSSxDQUFDLE1BQU0sRUFBRSxHQUFHLElBQUksQ0FBQyxFQUFFLENBQUM7UUFFNUgsSUFBSSxJQUFJLENBQUMsS0FBSyxFQUFFLENBQUM7WUFDZixJQUFJLENBQUMsTUFBTSxDQUFDLElBQUksQ0FBQywrRUFBK0UsY0FBYyxlQUFlLHFCQUFxQixnQkFBZ0IsU0FBUyxZQUFZLEtBQUssRUFBRSxDQUFDLENBQUM7UUFDbE0sQ0FBQztRQUNELElBQUksQ0FBQztZQUNILE1BQU0sRUFDSixJQUFJLEVBQUUsTUFBTSxFQUNaLE1BQU0sRUFDTixPQUFPLEdBQ1IsR0FBRyxNQUFNLElBQUksQ0FBQyxRQUFRLENBQUMsV0FBVyxDQUFDLFVBQVUsQ0FBQztnQkFDN0MsTUFBTSxFQUFFLGNBQWM7Z0JBQ3RCLEtBQUs7Z0JBQ0wsUUFBUSxFQUFFLHFCQUFxQjtnQkFDL0IsU0FBUztnQkFDVCxZQUFZO2dCQUNaLFFBQVEsRUFBRTtvQkFDUixVQUFVO29CQUNWLFFBQVE7b0JBQ1IsT0FBTztvQkFDUCxHQUFHLGNBQWM7aUJBQ2xCO2FBQ0YsQ0FBQyxDQUFDO1lBQ0gsSUFBSSxJQUFJLENBQUMsS0FBSyxFQUFFLENBQUM7Z0JBQ2YsSUFBSSxDQUFDLE1BQU0sQ0FBQyxJQUFJLENBQUMseURBQXlELE1BQU0sY0FBYyxPQUFPLFdBQVcsSUFBSSxDQUFDLFNBQVMsQ0FBQyxNQUFNLEVBQUUsSUFBSSxFQUFFLENBQUMsQ0FBQyxFQUFFLENBQUMsQ0FBQztZQUNySixDQUFDO1lBQ0QsSUFBSSxNQUFNLEtBQUssS0FBSyxFQUFFLENBQUM7Z0JBQ3JCLE1BQU0sSUFBSSxtQkFBVyxDQUNuQixtQkFBVyxDQUFDLEtBQUssQ0FBQyxnQkFBZ0IsRUFDbEMscUNBQXFDLEVBQ3JDLE9BQU8sQ0FDUixDQUFDO1lBQ0osQ0FBQztZQUNELE9BQU87Z0JBQ0wsRUFBRSxFQUFFLE1BQU0sQ0FBQyxTQUFTO2dCQUNwQixNQUFNLEVBQUUsNEJBQW9CLENBQUMsT0FBTztnQkFDcEMsSUFBSSxFQUFFO29CQUNKLGFBQWEsRUFBRSxNQUFNLENBQUMsU0FBUztvQkFDL0Isb0JBQW9CLEVBQUUsTUFBTSxDQUFDLFdBQVc7b0JBQ3hDLDBCQUEwQixFQUFFLE1BQU0sQ0FBQyxpQkFBaUI7aUJBQ1I7YUFDL0MsQ0FBQztRQUNKLENBQUM7UUFBQyxPQUFPLEtBQUssRUFBRSxDQUFDO1lBQ2YsSUFBSSxJQUFJLENBQUMsS0FBSyxFQUFFLENBQUM7Z0JBQ2YsSUFBSSxDQUFDLE1BQU0sQ0FBQyxLQUFLLENBQUMsMENBQTBDLEVBQUUsS0FBSyxDQUFDLENBQUM7WUFDdkUsQ0FBQztZQUNELE1BQU0sSUFBSSxtQkFBVyxDQUNuQixtQkFBVyxDQUFDLEtBQUssQ0FBQyxnQkFBZ0IsRUFDbEMscUNBQXFDLEVBQ3JDLEtBQUssRUFBRSxRQUFRLEVBQUUsSUFBSSxlQUFlLENBQ3JDLENBQUM7UUFDSixDQUFDO0lBQ0gsQ0FBQztJQUVELEtBQUssQ0FBQyxtQkFBbUIsQ0FDdkIsS0FBK0I7UUFFL0IsSUFBSSxJQUFJLENBQUMsS0FBSyxFQUFFLENBQUM7WUFDZixJQUFJLENBQUMsTUFBTSxDQUFDLElBQUksQ0FBQyxzREFBc0QsSUFBSSxDQUFDLFNBQVMsQ0FBQyxLQUFLLEVBQUUsSUFBSSxFQUFFLENBQUMsQ0FBQyxFQUFFLENBQUMsQ0FBQztRQUMzRyxDQUFDO1FBQ0QsTUFBTSxFQUFFLFFBQVEsRUFBRSxHQUFHLEtBQUssQ0FBQyxPQUFPLElBQUksRUFBRSxDQUFDO1FBQ3pDLElBQUksQ0FBQyxRQUFRLEVBQUUsS0FBSyxFQUFFLENBQUM7WUFDckIsTUFBTSxNQUFNLEdBQUcsV0FBVyxJQUFJLENBQUMsR0FBRyxFQUFFLEVBQUUsQ0FBQztZQUN2QyxJQUFJLElBQUksQ0FBQyxLQUFLO2dCQUFFLElBQUksQ0FBQyxNQUFNLENBQUMsSUFBSSxDQUFDLHlFQUF5RSxNQUFNLEVBQUUsQ0FBQyxDQUFDO1lBQ3BILE9BQU8sRUFBRSxFQUFFLEVBQUUsTUFBTSxFQUFFLENBQUM7UUFDeEIsQ0FBQztRQUNELElBQUksQ0FBQztZQUNILElBQUksSUFBSSxDQUFDLEtBQUs7Z0JBQUUsSUFBSSxDQUFDLE1BQU0sQ0FBQyxJQUFJLENBQUMsOEVBQThFLFFBQVEsQ0FBQyxLQUFLLEVBQUUsQ0FBQyxDQUFDO1lBQ2pJLE1BQU0sRUFBRSxJQUFJLEVBQUUsTUFBTSxFQUFFLE9BQU8sRUFBRSxHQUFHLE1BQU0sSUFBSSxDQUFDLFFBQVEsQ0FBQyxRQUFRLENBQUMsTUFBTSxDQUFDO2dCQUNwRSxLQUFLLEVBQUUsUUFBUSxDQUFDLEtBQUs7Z0JBQ3JCLFVBQVUsRUFBRSxRQUFRLENBQUMsVUFBVSxJQUFJLFNBQVM7Z0JBQzVDLFNBQVMsRUFBRSxRQUFRLENBQUMsU0FBUyxJQUFJLFNBQVM7Z0JBQzFDLEtBQUssRUFBRSxRQUFRLENBQUMsS0FBSyxJQUFJLFNBQVM7YUFDbkMsQ0FBQyxDQUFDO1lBQ0gsSUFBSSxJQUFJLENBQUMsS0FBSyxFQUFFLENBQUM7Z0JBQ2YsSUFBSSxDQUFDLE1BQU0sQ0FBQyxJQUFJLENBQUMsNkRBQTZELE1BQU0sY0FBYyxPQUFPLFdBQVcsSUFBSSxDQUFDLFNBQVMsQ0FBQyxJQUFJLEVBQUUsSUFBSSxFQUFFLENBQUMsQ0FBQyxFQUFFLENBQUMsQ0FBQztZQUN2SixDQUFDO1lBQ0QsSUFBSSxNQUFNLEtBQUssS0FBSyxFQUFFLENBQUM7Z0JBQ3JCLE1BQU0sSUFBSSxtQkFBVyxDQUNuQixtQkFBVyxDQUFDLEtBQUssQ0FBQyxnQkFBZ0IsRUFDbEMsT0FBTyxJQUFJLG9CQUFvQixDQUNoQyxDQUFDO1lBQ0osQ0FBQztZQUNELE9BQU8sRUFBRSxFQUFFLEVBQUUsSUFBSSxDQUFDLGFBQWEsRUFBRSxDQUFDO1FBQ3BDLENBQUM7UUFBQyxPQUFPLEtBQVUsRUFBRSxDQUFDO1lBQ3BCLElBQUksSUFBSSxDQUFDLEtBQUssRUFBRSxDQUFDO2dCQUNmLElBQUksQ0FBQyxNQUFNLENBQUMsS0FBSyxDQUFDLDhDQUE4QyxFQUFFLEtBQUssQ0FBQyxDQUFDO1lBQzNFLENBQUM7WUFDRCxNQUFNLElBQUksbUJBQVcsQ0FDbkIsbUJBQVcsQ0FBQyxLQUFLLENBQUMsZ0JBQWdCLEVBQ2xDLG9DQUFvQyxFQUNwQyxLQUFLLEVBQUUsUUFBUSxFQUFFLElBQUksZUFBZSxDQUNyQyxDQUFDO1FBQ0osQ0FBQztJQUNILENBQUM7SUFFRCxLQUFLLENBQUMsbUJBQW1CLENBQ3ZCLEtBQStCO1FBRS9CLElBQUksSUFBSSxDQUFDLEtBQUssRUFBRSxDQUFDO1lBQ2YsSUFBSSxDQUFDLE1BQU0sQ0FBQyxJQUFJLENBQUMsc0RBQXNELElBQUksQ0FBQyxTQUFTLENBQUMsS0FBSyxFQUFFLElBQUksRUFBRSxDQUFDLENBQUMsRUFBRSxDQUFDLENBQUM7UUFDM0csQ0FBQztRQUNELE1BQU0sRUFBRSxjQUFjLEVBQUUsUUFBUSxFQUFFLEdBQUcsS0FBSyxDQUFDLE9BQU8sSUFBSSxFQUFFLENBQUM7UUFDekQsTUFBTSxZQUFZLEdBQUcsY0FBYyxFQUFFLElBQUksRUFBRSxFQUF3QixDQUFDO1FBQ3BFLElBQUksQ0FBQyxZQUFZLElBQUksQ0FBQyxZQUFZLENBQUMsVUFBVSxDQUFDLE1BQU0sQ0FBQyxJQUFJLENBQUMsUUFBUSxFQUFFLENBQUM7WUFDbkUsTUFBTSxRQUFRLEdBQUcsWUFBWSxJQUFJLFdBQVcsSUFBSSxDQUFDLEdBQUcsRUFBRSxFQUFFLENBQUM7WUFDekQsSUFBSSxJQUFJLENBQUMsS0FBSztnQkFBRSxJQUFJLENBQUMsTUFBTSxDQUFDLElBQUksQ0FBQyw0RkFBNEYsUUFBUSxFQUFFLENBQUMsQ0FBQztZQUN6SSxPQUFPLEVBQUUsRUFBRSxFQUFFLFFBQVEsRUFBRSxDQUFDO1FBQzFCLENBQUM7UUFDRCxJQUFJLENBQUM7WUFDSCxJQUFJLElBQUksQ0FBQyxLQUFLO2dCQUFFLElBQUksQ0FBQyxNQUFNLENBQUMsSUFBSSxDQUFDLHFEQUFxRCxZQUFZLGdCQUFnQixDQUFDLENBQUM7WUFDcEgsTUFBTSxFQUFFLE1BQU0sRUFBRSxPQUFPLEVBQUUsR0FBRyxNQUFNLElBQUksQ0FBQyxRQUFRLENBQUMsUUFBUSxDQUFDLE1BQU0sQ0FDN0QsWUFBWSxFQUNaO2dCQUNFLFVBQVUsRUFBRSxRQUFRLENBQUMsVUFBVSxJQUFJLFNBQVM7Z0JBQzVDLFNBQVMsRUFBRSxRQUFRLENBQUMsU0FBUyxJQUFJLFNBQVM7Z0JBQzFDLEtBQUssRUFBRSxRQUFRLENBQUMsS0FBSyxJQUFJLFNBQVM7YUFDbkMsQ0FDRixDQUFDO1lBQ0YsSUFBSSxJQUFJLENBQUMsS0FBSyxFQUFFLENBQUM7Z0JBQ2YsSUFBSSxDQUFDLE1BQU0sQ0FBQyxJQUFJLENBQUMsNkRBQTZELE1BQU0sY0FBYyxPQUFPLEVBQUUsQ0FBQyxDQUFDO1lBQy9HLENBQUM7WUFDRCxJQUFJLE1BQU0sS0FBSyxLQUFLLEVBQUUsQ0FBQztnQkFDckIsSUFBSSxJQUFJLENBQUMsS0FBSyxFQUFFLENBQUM7b0JBQ2YsSUFBSSxDQUFDLE1BQU0sQ0FBQyxLQUFLLENBQUMsOENBQThDLE9BQU8sRUFBRSxDQUFDLENBQUM7Z0JBQzdFLENBQUM7WUFDSCxDQUFDO1lBQ0QsT0FBTyxFQUFFLEVBQUUsRUFBRSxZQUFZLEVBQUUsQ0FBQztRQUM5QixDQUFDO1FBQUMsT0FBTyxLQUFVLEVBQUUsQ0FBQztZQUNwQixJQUFJLElBQUksQ0FBQyxLQUFLLEVBQUUsQ0FBQztnQkFDZixJQUFJLENBQUMsTUFBTSxDQUFDLEtBQUssQ0FBQyw4Q0FBOEMsRUFBRSxLQUFLLENBQUMsQ0FBQztZQUMzRSxDQUFDO1lBQ0QsT0FBTyxFQUFFLEVBQUUsRUFBRSxZQUFZLEVBQUUsQ0FBQztRQUM5QixDQUFDO0lBQ0gsQ0FBQztJQUVELEtBQUssQ0FBQyxtQkFBbUIsQ0FDdkIsS0FBK0I7UUFFL0IsSUFBSSxJQUFJLENBQUMsS0FBSyxFQUFFLENBQUM7WUFDZixJQUFJLENBQUMsTUFBTSxDQUFDLElBQUksQ0FBQyxzREFBc0QsSUFBSSxDQUFDLFNBQVMsQ0FBQyxLQUFLLEVBQUUsSUFBSSxFQUFFLENBQUMsQ0FBQyxVQUFVLENBQUMsQ0FBQztRQUNuSCxDQUFDO1FBQ0QsT0FBTztJQUNULENBQUM7SUFFRCxLQUFLLENBQUMsYUFBYSxDQUFDLEtBQXlCO1FBQzNDLElBQUksSUFBSSxDQUFDLEtBQUssRUFBRSxDQUFDO1lBQ2YsSUFBSSxDQUFDLE1BQU0sQ0FBQyxJQUFJLENBQUMsZ0RBQWdELElBQUksQ0FBQyxTQUFTLENBQUMsS0FBSyxFQUFFLElBQUksRUFBRSxDQUFDLENBQUMsRUFBRSxDQUFDLENBQUM7UUFDckcsQ0FBQztRQUNELElBQUksSUFBSSxDQUFDLEtBQUs7WUFBRSxJQUFJLENBQUMsTUFBTSxDQUFDLElBQUksQ0FBQyx5REFBeUQsQ0FBQyxDQUFDO1FBQzVGLE1BQU0sT0FBTyxHQUFHLE1BQU0sSUFBSSxDQUFDLGVBQWUsQ0FBQyxLQUFLLENBQUMsQ0FBQztRQUNsRCxJQUFJLElBQUksQ0FBQyxLQUFLO1lBQUUsSUFBSSxDQUFDLE1BQU0sQ0FBQyxJQUFJLENBQUMsdURBQXVELE9BQU8sQ0FBQyxNQUFNLEVBQUUsQ0FBQyxDQUFDO1FBQzFHLE9BQU87WUFDTCxJQUFJLEVBQUUsT0FBTyxDQUFDLElBQUk7WUFDbEIsTUFBTSxFQUFFLE9BQU8sQ0FBQyxNQUFNO1NBQ3ZCLENBQUM7SUFDSixDQUFDO0lBRUQsS0FBSyxDQUFDLGdCQUFnQixDQUNwQixLQUE0QjtRQUU1QixJQUFJLElBQUksQ0FBQyxLQUFLLEVBQUUsQ0FBQztZQUNmLElBQUksQ0FBQyxNQUFNLENBQUMsSUFBSSxDQUFDLG1EQUFtRCxJQUFJLENBQUMsU0FBUyxDQUFDLEtBQUssRUFBRSxJQUFJLEVBQUUsQ0FBQyxDQUFDLEVBQUUsQ0FBQyxDQUFDO1FBQ3hHLENBQUM7UUFDRCxJQUFJLENBQUM7WUFDSCxNQUFNLEVBQUUsYUFBYSxFQUFFLEdBQUcsS0FBSyxDQUFDLElBQTBDLENBQUM7WUFDM0UsSUFBSSxDQUFDLGFBQWEsRUFBRSxDQUFDO2dCQUNuQixNQUFNLFFBQVEsR0FBRyx3Q0FBd0MsQ0FBQztnQkFDMUQsSUFBSSxJQUFJLENBQUMsS0FBSztvQkFBRSxJQUFJLENBQUMsTUFBTSxDQUFDLEtBQUssQ0FBQyx1Q0FBdUMsUUFBUSxFQUFFLENBQUMsQ0FBQztnQkFDckYsTUFBTSxJQUFJLG1CQUFXLENBQUMsbUJBQVcsQ0FBQyxLQUFLLENBQUMsWUFBWSxFQUFFLFFBQVEsQ0FBQyxDQUFDO1lBQ2xFLENBQUM7WUFDRCxJQUFJLElBQUksQ0FBQyxLQUFLO2dCQUFFLElBQUksQ0FBQyxNQUFNLENBQUMsSUFBSSxDQUFDLHNEQUFzRCxhQUFhLGdCQUFnQixDQUFDLENBQUM7WUFDdEgsTUFBTSxFQUFFLE1BQU0sRUFBRSxRQUFRLEVBQUUsSUFBSSxFQUFFLEdBQUcsTUFBTSxJQUFJLENBQUMsUUFBUSxDQUFDLFdBQVcsQ0FBQyxNQUFNLENBQUMsYUFBYSxDQUFDLENBQUM7WUFDekYsSUFBSSxJQUFJLENBQUMsS0FBSyxFQUFFLENBQUM7Z0JBQ2YsSUFBSSxDQUFDLE1BQU0sQ0FBQyxJQUFJLENBQUMsdUVBQXVFLFFBQVEsV0FBVyxJQUFJLENBQUMsU0FBUyxDQUFDLElBQUksRUFBRSxJQUFJLEVBQUUsQ0FBQyxDQUFDLEVBQUUsQ0FBQyxDQUFDO1lBQzlJLENBQUM7WUFDRCxJQUFJLFFBQVEsS0FBSyxLQUFLLEVBQUUsQ0FBQztnQkFDdkIsSUFBSSxJQUFJLENBQUMsS0FBSztvQkFBRSxJQUFJLENBQUMsTUFBTSxDQUFDLElBQUksQ0FBQywwRUFBMEUsQ0FBQyxDQUFDO2dCQUM3RyxPQUFPO29CQUNMLE1BQU0sRUFBRSw0QkFBb0IsQ0FBQyxLQUFLO29CQUNsQyxJQUFJLEVBQUU7d0JBQ0osR0FBRyxLQUFLLENBQUMsSUFBSTt3QkFDYixZQUFZLEVBQUUsSUFBSSxDQUFDLEVBQUU7d0JBQ3JCLGNBQWMsRUFBRSxJQUFJO3FCQUNyQjtpQkFDRixDQUFDO1lBQ0osQ0FBQztZQUNELFFBQVEsSUFBSSxDQUFDLE1BQU0sRUFBRSxDQUFDO2dCQUNwQixLQUFLLFNBQVM7b0JBQ1osSUFBSSxJQUFJLENBQUMsS0FBSzt3QkFBRSxJQUFJLENBQUMsTUFBTSxDQUFDLElBQUksQ0FBQyxnRkFBZ0YsQ0FBQyxDQUFDO29CQUNuSCxPQUFPO3dCQUNMLE1BQU0sRUFBRSw0QkFBb0IsQ0FBQyxRQUFRO3dCQUNyQyxJQUFJLEVBQUU7NEJBQ0osR0FBRyxLQUFLLENBQUMsSUFBSTs0QkFDYixZQUFZLEVBQUUsSUFBSSxDQUFDLEVBQUU7NEJBQ3JCLGNBQWMsRUFBRSxJQUFJO3lCQUNyQjtxQkFDRixDQUFDO2dCQUNKLEtBQUssUUFBUTtvQkFDWCxJQUFJLElBQUksQ0FBQyxLQUFLO3dCQUFFLElBQUksQ0FBQyxNQUFNLENBQUMsSUFBSSxDQUFDLHlFQUF5RSxDQUFDLENBQUM7b0JBQzVHLE9BQU87d0JBQ0wsTUFBTSxFQUFFLDRCQUFvQixDQUFDLEtBQUs7d0JBQ2xDLElBQUksRUFBRTs0QkFDSixHQUFHLEtBQUssQ0FBQyxJQUFJOzRCQUNiLFlBQVksRUFBRSxJQUFJLENBQUMsRUFBRTs0QkFDckIsY0FBYyxFQUFFLElBQUk7eUJBQ3JCO3FCQUNGLENBQUM7Z0JBQ0o7b0JBQ0UsSUFBSSxJQUFJLENBQUMsS0FBSzt3QkFBRSxJQUFJLENBQUMsTUFBTSxDQUFDLElBQUksQ0FBQyxzREFBc0QsSUFBSSxDQUFDLE1BQU0sNEJBQTRCLENBQUMsQ0FBQztvQkFDaEksT0FBTzt3QkFDTCxNQUFNLEVBQUUsNEJBQW9CLENBQUMsT0FBTzt3QkFDcEMsSUFBSSxFQUFFOzRCQUNKLEdBQUcsS0FBSyxDQUFDLElBQUk7NEJBQ2IsWUFBWSxFQUFFLElBQUksQ0FBQyxFQUFFOzRCQUNyQixjQUFjLEVBQUUsSUFBSTt5QkFDckI7cUJBQ0YsQ0FBQztZQUNOLENBQUM7UUFDSCxDQUFDO1FBQUMsT0FBTyxLQUFLLEVBQUUsQ0FBQztZQUNmLElBQUksSUFBSSxDQUFDLEtBQUssRUFBRSxDQUFDO2dCQUNmLElBQUksQ0FBQyxNQUFNLENBQUMsS0FBSyxDQUFDLDJDQUEyQyxFQUFFLEtBQUssQ0FBQyxDQUFDO1lBQ3hFLENBQUM7WUFDRCxNQUFNLElBQUksbUJBQVcsQ0FDbkIsbUJBQVcsQ0FBQyxLQUFLLENBQUMsZ0JBQWdCLEVBQ2xDLDZCQUE2QixFQUM3QixLQUFLLEVBQUUsUUFBUSxFQUFFLElBQUksZUFBZSxDQUNyQyxDQUFDO1FBQ0osQ0FBQztJQUNILENBQUM7SUFFRCxLQUFLLENBQUMsZUFBZSxDQUNuQixLQUEyQjtRQUUzQixJQUFJLElBQUksQ0FBQyxLQUFLLEVBQUUsQ0FBQztZQUNmLElBQUksQ0FBQyxNQUFNLENBQUMsSUFBSSxDQUFDLGtEQUFrRCxJQUFJLENBQUMsU0FBUyxDQUFDLEtBQUssRUFBRSxJQUFJLEVBQUUsQ0FBQyxDQUFDLEVBQUUsQ0FBQyxDQUFDO1FBQ3ZHLENBQUM7UUFDRCxJQUFJLENBQUM7WUFDSCxNQUFNLEVBQUUsWUFBWSxFQUFFLEdBQUcsS0FBSyxDQUFDLElBQW9ELENBQUM7WUFDcEYsSUFBSSxDQUFDLFlBQVksRUFBRSxDQUFDO2dCQUNsQixNQUFNLFFBQVEsR0FBRyw2RUFBNkUsQ0FBQztnQkFDL0YsSUFBSSxJQUFJLENBQUMsS0FBSztvQkFBRSxJQUFJLENBQUMsTUFBTSxDQUFDLEtBQUssQ0FBQyxzQ0FBc0MsUUFBUSxFQUFFLENBQUMsQ0FBQztnQkFDcEYsTUFBTSxJQUFJLG1CQUFXLENBQUMsbUJBQVcsQ0FBQyxLQUFLLENBQUMsWUFBWSxFQUFFLFFBQVEsQ0FBQyxDQUFDO1lBQ2xFLENBQUM7WUFDRCxJQUFJLElBQUksQ0FBQyxLQUFLO2dCQUFFLElBQUksQ0FBQyxNQUFNLENBQUMsSUFBSSxDQUFDLG9EQUFvRCxZQUFZLGdCQUFnQixDQUFDLENBQUM7WUFDbkgsTUFBTSxFQUFFLElBQUksRUFBRSxNQUFNLEVBQUUsT0FBTyxFQUFFLEdBQUcsTUFBTSxJQUFJLENBQUMsUUFBUSxDQUFDLFdBQVcsQ0FBQyxHQUFHLENBQUMsRUFBRSxFQUFFLEVBQUUsWUFBWSxFQUFFLENBQUMsQ0FBQztZQUM1RixJQUFJLElBQUksQ0FBQyxLQUFLLEVBQUUsQ0FBQztnQkFDZixJQUFJLENBQUMsTUFBTSxDQUFDLElBQUksQ0FBQyx5REFBeUQsTUFBTSxjQUFjLE9BQU8sV0FBVyxJQUFJLENBQUMsU0FBUyxDQUFDLElBQUksRUFBRSxJQUFJLEVBQUUsQ0FBQyxDQUFDLEVBQUUsQ0FBQyxDQUFDO1lBQ25KLENBQUM7WUFDRCxJQUFJLE1BQU0sS0FBSyxLQUFLLEVBQUUsQ0FBQztnQkFDckIsTUFBTSxJQUFJLG1CQUFXLENBQ25CLG1CQUFXLENBQUMsS0FBSyxDQUFDLGdCQUFnQixFQUNsQyw0QkFBNEIsRUFDNUIsT0FBTyxDQUNSLENBQUM7WUFDSixDQUFDO1lBQ0QsT0FBTztnQkFDTCxJQUFJLEVBQUU7b0JBQ0osR0FBRyxLQUFLLENBQUMsSUFBSTtvQkFDYixjQUFjLEVBQUUsSUFBSTtpQkFDckI7YUFDRixDQUFDO1FBQ0osQ0FBQztRQUFDLE9BQU8sS0FBSyxFQUFFLENBQUM7WUFDZixJQUFJLElBQUksQ0FBQyxLQUFLLEVBQUUsQ0FBQztnQkFDZixJQUFJLENBQUMsTUFBTSxDQUFDLEtBQUssQ0FBQywwQ0FBMEMsRUFBRSxLQUFLLENBQUMsQ0FBQztZQUN2RSxDQUFDO1lBQ0QsTUFBTSxJQUFJLG1CQUFXLENBQ25CLG1CQUFXLENBQUMsS0FBSyxDQUFDLGdCQUFnQixFQUNsQyw0QkFBNEIsRUFDNUIsS0FBSyxFQUFFLFFBQVEsRUFBRSxJQUFJLGVBQWUsQ0FDckMsQ0FBQztRQUNKLENBQUM7SUFDSCxDQUFDO0lBRUQsS0FBSyxDQUFDLGFBQWEsQ0FBQyxLQUF5QjtRQUMzQyxJQUFJLElBQUksQ0FBQyxLQUFLLEVBQUUsQ0FBQztZQUNmLElBQUksQ0FBQyxNQUFNLENBQUMsSUFBSSxDQUFDLGdEQUFnRCxJQUFJLENBQUMsU0FBUyxDQUFDLEtBQUssRUFBRSxJQUFJLEVBQUUsQ0FBQyxDQUFDLEVBQUUsQ0FBQyxDQUFDO1FBQ3JHLENBQUM7UUFDRCxJQUFJLENBQUM7WUFDSCxNQUFNLEVBQUUsWUFBWSxFQUFFLEdBQUcsS0FBSyxDQUFDLElBQW9ELENBQUM7WUFDcEYsSUFBSSxDQUFDLFlBQVksRUFBRSxDQUFDO2dCQUNsQixNQUFNLFFBQVEsR0FBRyx1Q0FBdUMsQ0FBQztnQkFDekQsSUFBSSxJQUFJLENBQUMsS0FBSztvQkFBRSxJQUFJLENBQUMsTUFBTSxDQUFDLEtBQUssQ0FBQyxvQ0FBb0MsUUFBUSxFQUFFLENBQUMsQ0FBQztnQkFDbEYsTUFBTSxJQUFJLG1CQUFXLENBQUMsbUJBQVcsQ0FBQyxLQUFLLENBQUMsWUFBWSxFQUFFLFFBQVEsQ0FBQyxDQUFDO1lBQ2xFLENBQUM7WUFDRCxNQUFNLFlBQVksR0FBRyxJQUFJLENBQUMsS0FBSyxDQUFDLE1BQU0sQ0FBQyxLQUFLLENBQUMsTUFBTSxDQUFDLEdBQUcsR0FBRyxDQUFDLENBQUM7WUFDNUQsSUFBSSxJQUFJLENBQUMsS0FBSztnQkFBRSxJQUFJLENBQUMsTUFBTSxDQUFDLElBQUksQ0FBQyw2RUFBNkUsWUFBWSxhQUFhLFlBQVksRUFBRSxDQUFDLENBQUM7WUFDdkosTUFBTSxFQUFFLElBQUksRUFBRSxNQUFNLEVBQUUsT0FBTyxFQUFFLEdBQUcsTUFBTSxJQUFJLENBQUMsUUFBUSxDQUFDLE1BQU0sQ0FBQyxNQUFNLENBQUM7Z0JBQ2xFLFdBQVcsRUFBRSxZQUFZO2dCQUN6QixNQUFNLEVBQUUsWUFBWTthQUNyQixDQUFDLENBQUM7WUFDSCxJQUFJLElBQUksQ0FBQyxLQUFLLEVBQUUsQ0FBQztnQkFDZixJQUFJLENBQUMsTUFBTSxDQUFDLElBQUksQ0FBQyx1REFBdUQsTUFBTSxjQUFjLE9BQU8sV0FBVyxJQUFJLENBQUMsU0FBUyxDQUFDLElBQUksRUFBRSxJQUFJLEVBQUUsQ0FBQyxDQUFDLEVBQUUsQ0FBQyxDQUFDO1lBQ2pKLENBQUM7WUFDRCxJQUFJLE1BQU0sS0FBSyxLQUFLLEVBQUUsQ0FBQztnQkFDckIsTUFBTSxJQUFJLG1CQUFXLENBQ25CLG1CQUFXLENBQUMsS0FBSyxDQUFDLGdCQUFnQixFQUNsQywwQkFBMEIsRUFDMUIsT0FBTyxDQUNSLENBQUM7WUFDSixDQUFDO1lBQ0QsT0FBTztnQkFDTCxJQUFJLEVBQUU7b0JBQ0osR0FBRyxLQUFLLENBQUMsSUFBSTtvQkFDYixjQUFjLEVBQUUsSUFBSTtpQkFDckI7YUFDRixDQUFDO1FBQ0osQ0FBQztRQUFDLE9BQU8sS0FBSyxFQUFFLENBQUM7WUFDZixJQUFJLElBQUksQ0FBQyxLQUFLLEVBQUUsQ0FBQztnQkFDZixJQUFJLENBQUMsTUFBTSxDQUFDLEtBQUssQ0FBQyx3Q0FBd0MsRUFBRSxLQUFLLENBQUMsQ0FBQztZQUNyRSxDQUFDO1lBQ0QsTUFBTSxJQUFJLG1CQUFXLENBQ25CLG1CQUFXLENBQUMsS0FBSyxDQUFDLGdCQUFnQixFQUNsQywwQkFBMEIsRUFDMUIsS0FBSyxFQUFFLFFBQVEsRUFBRSxJQUFJLGVBQWUsQ0FDckMsQ0FBQztRQUNKLENBQUM7SUFDSCxDQUFDO0lBRUQsS0FBSyxDQUFDLGdCQUFnQixDQUNwQixLQUE0QjtRQUU1QixJQUFJLElBQUksQ0FBQyxLQUFLLEVBQUUsQ0FBQztZQUNmLElBQUksQ0FBQyxNQUFNLENBQUMsSUFBSSxDQUFDLG1EQUFtRCxJQUFJLENBQUMsU0FBUyxDQUFDLEtBQUssRUFBRSxJQUFJLEVBQUUsQ0FBQyxDQUFDLEVBQUUsQ0FBQyxDQUFDO1FBQ3hHLENBQUM7UUFDRCxNQUFNLEVBQUUsWUFBWSxFQUFFLEdBQUcsS0FBSyxDQUFDLElBQW9ELENBQUM7UUFDcEYsSUFBSSxDQUFDLFlBQVksRUFBRSxDQUFDO1lBQ2xCLElBQUksSUFBSSxDQUFDLEtBQUs7Z0JBQUUsSUFBSSxDQUFDLE1BQU0sQ0FBQyxJQUFJLENBQUMsdUVBQXVFLENBQUMsQ0FBQztZQUMxRyxPQUFPLEVBQUUsTUFBTSxFQUFFLDRCQUFvQixDQUFDLE9BQU8sRUFBRSxDQUFDO1FBQ2xELENBQUM7UUFDRCxJQUFJLENBQUM7WUFDSCxJQUFJLElBQUksQ0FBQyxLQUFLO2dCQUFFLElBQUksQ0FBQyxNQUFNLENBQUMsSUFBSSxDQUFDLHFEQUFxRCxZQUFZLGdCQUFnQixDQUFDLENBQUM7WUFDcEgsTUFBTSxFQUFFLElBQUksRUFBRSxNQUFNLEVBQUUsR0FBRyxNQUFNLElBQUksQ0FBQyxRQUFRLENBQUMsV0FBVyxDQUFDLEdBQUcsQ0FBQyxFQUFFLEVBQUUsRUFBRSxZQUFZLEVBQUUsQ0FBQyxDQUFDO1lBQ25GLElBQUksSUFBSSxDQUFDLEtBQUssRUFBRSxDQUFDO2dCQUNmLElBQUksQ0FBQyxNQUFNLENBQUMsSUFBSSxDQUFDLDBEQUEwRCxNQUFNLFdBQVcsSUFBSSxDQUFDLFNBQVMsQ0FBQyxJQUFJLEVBQUUsSUFBSSxFQUFFLENBQUMsQ0FBQyxFQUFFLENBQUMsQ0FBQztZQUMvSCxDQUFDO1lBQ0QsSUFBSSxNQUFNLEtBQUssS0FBSyxFQUFFLENBQUM7Z0JBQ3JCLElBQUksSUFBSSxDQUFDLEtBQUs7b0JBQUUsSUFBSSxDQUFDLE1BQU0sQ0FBQyxJQUFJLENBQUMsOEVBQThFLENBQUMsQ0FBQztnQkFDakgsT0FBTyxFQUFFLE1BQU0sRUFBRSw0QkFBb0IsQ0FBQyxLQUFLLEVBQUUsQ0FBQztZQUNoRCxDQUFDO1lBQ0QsUUFBUSxJQUFJLEVBQUUsTUFBTSxFQUFFLENBQUM7Z0JBQ3JCLEtBQUssU0FBUztvQkFDWixJQUFJLElBQUksQ0FBQyxLQUFLO3dCQUFFLElBQUksQ0FBQyxNQUFNLENBQUMsSUFBSSxDQUFDLHlFQUF5RSxDQUFDLENBQUM7b0JBQzVHLE9BQU8sRUFBRSxNQUFNLEVBQUUsNEJBQW9CLENBQUMsUUFBUSxFQUFFLENBQUM7Z0JBQ25ELEtBQUssUUFBUTtvQkFDWCxJQUFJLElBQUksQ0FBQyxLQUFLO3dCQUFFLElBQUksQ0FBQyxNQUFNLENBQUMsSUFBSSxDQUFDLGtFQUFrRSxDQUFDLENBQUM7b0JBQ3JHLE9BQU8sRUFBRSxNQUFNLEVBQUUsNEJBQW9CLENBQUMsS0FBSyxFQUFFLENBQUM7Z0JBQ2hEO29CQUNFLElBQUksSUFBSSxDQUFDLEtBQUs7d0JBQUUsSUFBSSxDQUFDLE1BQU0sQ0FBQyxJQUFJLENBQUMsc0RBQXNELElBQUksRUFBRSxNQUFNLHFCQUFxQixDQUFDLENBQUM7b0JBQzFILE9BQU8sRUFBRSxNQUFNLEVBQUUsNEJBQW9CLENBQUMsT0FBTyxFQUFFLENBQUM7WUFDcEQsQ0FBQztRQUNILENBQUM7UUFBQyxPQUFPLEtBQUssRUFBRSxDQUFDO1lBQ2YsSUFBSSxJQUFJLENBQUMsS0FBSyxFQUFFLENBQUM7Z0JBQ2YsSUFBSSxDQUFDLE1BQU0sQ0FBQyxLQUFLLENBQUMsMkNBQTJDLEVBQUUsS0FBSyxDQUFDLENBQUM7WUFDeEUsQ0FBQztZQUNELE9BQU8sRUFBRSxNQUFNLEVBQUUsNEJBQW9CLENBQUMsS0FBSyxFQUFFLENBQUM7UUFDaEQsQ0FBQztJQUNILENBQUM7SUFFRCxLQUFLLENBQUMsdUJBQXVCLENBQUMsRUFDNUIsSUFBSSxFQUFFLEVBQUUsS0FBSyxFQUFFLElBQUksRUFBRSxFQUNyQixPQUFPLEVBQ1AsT0FBTyxHQVlSO1FBQ0MsSUFBSSxJQUFJLENBQUMsS0FBSyxFQUFFLENBQUM7WUFDZixJQUFJLENBQUMsTUFBTSxDQUFDLElBQUksQ0FBQyx5REFBeUQsS0FBSyxnQkFBZ0IsSUFBSSxFQUFFLFNBQVMsRUFBRSxDQUFDLENBQUM7UUFDcEgsQ0FBQztRQUNELE1BQU0sZ0JBQWdCLEdBQUcsSUFBSSxDQUFDLGFBQWEsQ0FBQyxVQUFVLENBQUM7UUFDdkQsTUFBTSxJQUFJLEdBQUcsZ0JBQU07YUFDaEIsVUFBVSxDQUFDLFFBQVEsRUFBRSxnQkFBZ0IsQ0FBQzthQUN0QyxNQUFNLENBQUMsT0FBTyxDQUFDO2FBQ2YsTUFBTSxDQUFDLEtBQUssQ0FBQyxDQUFDO1FBQ2pCLElBQUksSUFBSSxLQUFLLE9BQU8sQ0FBQyxzQkFBc0IsQ0FBQyxFQUFFLENBQUM7WUFDN0MsSUFBSSxJQUFJLENBQUMsS0FBSztnQkFBRSxJQUFJLENBQUMsTUFBTSxDQUFDLElBQUksQ0FBQyx3REFBd0QsQ0FBQyxDQUFDO1lBQzNGLE9BQU8sRUFBRSxNQUFNLEVBQUUsc0JBQWMsQ0FBQyxhQUFhLEVBQUUsQ0FBQztRQUNsRCxDQUFDO1FBQ0QsSUFBSSxLQUFLLEtBQUssZ0JBQWdCLEVBQUUsQ0FBQztZQUMvQixJQUFJLElBQUksQ0FBQyxLQUFLO2dCQUFFLElBQUksQ0FBQyxNQUFNLENBQUMsSUFBSSxDQUFDLDREQUE0RCxLQUFLLEVBQUUsQ0FBQyxDQUFDO1lBQ3RHLE9BQU8sRUFBRSxNQUFNLEVBQUUsc0JBQWMsQ0FBQyxhQUFhLEVBQUUsQ0FBQztRQUNsRCxDQUFDO1FBQ0QsTUFBTSxTQUFTLEdBQUcsSUFBSSxDQUFDLFNBQVMsQ0FBQztRQUNqQyxJQUFJLENBQUMsU0FBUyxFQUFFLENBQUM7WUFDZixJQUFJLElBQUksQ0FBQyxLQUFLO2dCQUFFLElBQUksQ0FBQyxNQUFNLENBQUMsS0FBSyxDQUFDLHdFQUF3RSxDQUFDLENBQUM7WUFDNUcsT0FBTyxFQUFFLE1BQU0sRUFBRSxzQkFBYyxDQUFDLGFBQWEsRUFBRSxDQUFDO1FBQ2xELENBQUM7UUFFRCxNQUFNLFVBQVUsR0FBRyxJQUFJLENBQUMsUUFBUSxFQUFFLFVBQVUsQ0FBQztRQUM3QyxJQUFJLENBQUMsVUFBVSxFQUFFLENBQUM7WUFDaEIsSUFBSSxJQUFJLENBQUMsS0FBSztnQkFBRSxJQUFJLENBQUMsTUFBTSxDQUFDLEtBQUssQ0FBQyw2RUFBNkUsQ0FBQyxDQUFDO1lBQ2pILE9BQU8sRUFBRSxNQUFNLEVBQUUsc0JBQWMsQ0FBQyxhQUFhLEVBQUUsQ0FBQztRQUNsRCxDQUFDO1FBRUQsTUFBTSxlQUFlLEdBQUcsTUFBTSxDQUFDLElBQUksQ0FBQyxNQUFNLENBQUMsR0FBRyxHQUFHLENBQUM7UUFDbEQsSUFBSSxJQUFJLENBQUMsS0FBSyxFQUFFLENBQUM7WUFDZixJQUFJLENBQUMsTUFBTSxDQUFDLElBQUksQ0FBQyw0RUFBNEUsVUFBVSxFQUFFLENBQUMsQ0FBQztZQUMzRyxJQUFJLENBQUMsTUFBTSxDQUFDLElBQUksQ0FBQyxnRUFBZ0UsSUFBSSxDQUFDLE1BQU0sZ0NBQWdDLGVBQWUsRUFBRSxDQUFDLENBQUM7UUFDakosQ0FBQztRQUNELE9BQU87WUFDTCxNQUFNLEVBQUUsc0JBQWMsQ0FBQyxVQUFVO1lBQ2pDLElBQUksRUFBRTtnQkFDSixVQUFVLEVBQUUsVUFBVTtnQkFDdEIsTUFBTSxFQUFFLGVBQWU7YUFDeEI7U0FDRixDQUFDO0lBQ0osQ0FBQztJQUVELEtBQUssQ0FBQyxjQUFjLENBQ2xCLEtBQTBCO1FBRTFCLElBQUksSUFBSSxDQUFDLEtBQUssRUFBRSxDQUFDO1lBQ2YsSUFBSSxDQUFDLE1BQU0sQ0FBQyxJQUFJLENBQUMsaURBQWlELElBQUksQ0FBQyxTQUFTLENBQUMsS0FBSyxFQUFFLElBQUksRUFBRSxDQUFDLENBQUMsVUFBVSxDQUFDLENBQUM7UUFDOUcsQ0FBQztRQUNELE9BQU8sRUFBRSxJQUFJLEVBQUUsS0FBSyxDQUFDLElBQUksRUFBRSxDQUFDO0lBQzlCLENBQUM7SUFFRCxLQUFLLENBQUMsYUFBYSxDQUFDLEtBQXlCO1FBQzNDLElBQUksSUFBSSxDQUFDLEtBQUssRUFBRSxDQUFDO1lBQ2YsSUFBSSxDQUFDLE1BQU0sQ0FBQyxJQUFJLENBQUMsZ0RBQWdELElBQUksQ0FBQyxTQUFTLENBQUMsS0FBSyxFQUFFLElBQUksRUFBRSxDQUFDLENBQUMsVUFBVSxDQUFDLENBQUM7UUFDN0csQ0FBQztRQUNELE9BQU8sRUFBRSxJQUFJLEVBQUUsS0FBSyxDQUFDLElBQUksRUFBRSxDQUFDO0lBQzlCLENBQUM7SUFFRCxLQUFLLENBQUMsYUFBYSxDQUFDLEtBQXlCO1FBQzNDLElBQUksSUFBSSxDQUFDLEtBQUssRUFBRSxDQUFDO1lBQ2YsSUFBSSxDQUFDLE1BQU0sQ0FBQyxJQUFJLENBQUMsZ0RBQWdELElBQUksQ0FBQyxTQUFTLENBQUMsS0FBSyxFQUFFLElBQUksRUFBRSxDQUFDLENBQUMsVUFBVSxDQUFDLENBQUM7UUFDN0csQ0FBQztRQUNELE9BQU8sRUFBRSxJQUFJLEVBQUUsS0FBSyxDQUFDLElBQUksRUFBRSxDQUFDO0lBQzlCLENBQUM7O0FBNWdCTSxtQ0FBVSxHQUFHLFVBQVUsQ0FBQztBQStnQmpDLGtCQUFlLHdCQUF3QixDQUFDIn0=
+//# sourceMappingURL=data:application/json;base64,eyJ2ZXJzaW9uIjozLCJmaWxlIjoicGF5c3RhY2stcGF5bWVudC1wcm9jZXNzb3IuanMiLCJzb3VyY2VSb290IjoiIiwic291cmNlcyI6WyIuLi8uLi8uLi8uLi9zcmMvc2VydmljZXMvcGF5c3RhY2stcGF5bWVudC1wcm9jZXNzb3IudHMiXSwibmFtZXMiOltdLCJtYXBwaW5ncyI6Ijs7Ozs7QUFBQSxvREFBNEI7QUFDNUIsK0RBQXVDO0FBMEJ2QyxxREFNbUM7QUFDbkMsd0RBQTJEO0FBcUIzRCxNQUFNLG9CQUFvQixHQUFHLENBQUMsS0FBSyxFQUFFLEtBQUssRUFBRSxLQUFLLEVBQUUsS0FBSyxFQUFFLEtBQUssRUFBRSxLQUFLLEVBQUUsS0FBSyxDQUFDLENBQUM7QUFFL0UsTUFBTSx3QkFBeUIsU0FBUSwrQkFBdUQ7SUFRNUYsWUFDRSxNQUFnRSxFQUNoRSxPQUF1QztRQUV2QyxLQUFLLENBQUMsTUFBTSxFQUFFLE9BQU8sQ0FBQyxDQUFDO1FBQ3ZCLElBQUksQ0FBQyxPQUFPLENBQUMsVUFBVSxFQUFFLENBQUM7WUFDeEIsTUFBTSxJQUFJLG1CQUFXLENBQ25CLG1CQUFXLENBQUMsS0FBSyxDQUFDLGdCQUFnQixFQUNsQyxzREFBc0QsQ0FDdkQsQ0FBQztRQUNKLENBQUM7UUFDRCxJQUFJLENBQUMsYUFBYSxHQUFHLE9BQU8sQ0FBQztRQUM3QixJQUFJLENBQUMsUUFBUSxHQUFHLElBQUksa0JBQVEsQ0FBQyxJQUFJLENBQUMsYUFBYSxDQUFDLFVBQVUsRUFBRTtZQUMxRCxlQUFlLEVBQUUsT0FBTyxDQUFDLGVBQWU7WUFDeEMsTUFBTSxFQUFFLE1BQU0sQ0FBQyxNQUFNO1lBQ3JCLEtBQUssRUFBRSxPQUFPLENBQUMsT0FBTyxDQUFDLEtBQUssQ0FBQztTQUM5QixDQUFDLENBQUM7UUFDSCxJQUFJLENBQUMsS0FBSyxHQUFHLE9BQU8sQ0FBQyxPQUFPLENBQUMsS0FBSyxDQUFDLENBQUM7UUFDcEMsSUFBSSxDQUFDLE1BQU0sR0FBRyxNQUFNLENBQUMsTUFBTSxDQUFDO1FBQzVCLElBQUks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

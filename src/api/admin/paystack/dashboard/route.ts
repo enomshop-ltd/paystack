@@ -1,6 +1,16 @@
 import { MedusaRequest, MedusaResponse } from "@medusajs/framework/http";
 import Paystack from "../../../../lib/paystack";
 
+interface PaystackBalance {
+  currency: string;
+  balance: number;
+}
+
+interface PaystackTotal {
+  currency: string;
+  amount: number;
+}
+
 export async function GET(req: MedusaRequest, res: MedusaResponse) {
   const logger = req.scope.resolve("logger");
   try {
@@ -53,7 +63,7 @@ export async function GET(req: MedusaRequest, res: MedusaResponse) {
                       logger.info(`[Paystack API] Verifying transaction reference from order: ${ref}`);
                       const vRes = await paystack.transaction.verify(ref as string);
                       if (vRes.data) transactions.push(vRes.data);
-                    } catch (err) {
+                    } catch (err: any) {
                       logger.error(`[Paystack API] Failed to verify transaction reference ${ref}`, err);
                     }
                   }
@@ -78,22 +88,22 @@ export async function GET(req: MedusaRequest, res: MedusaResponse) {
           paystack.transaction.totals()
         ]);
 
-        const balancesData = balanceResponse.data || [];
+        const balancesData = (balanceResponse.data as unknown) as PaystackBalance[];
         for (const b of balancesData) {
           currentBalances[b.currency] = b.balance / 100;
         }
 
-        const totalsData = totalsResponse.data?.total_volume_by_currency || [];
+        const totalsData = (totalsResponse.data?.total_volume_by_currency as unknown) as PaystackTotal[];
+
         for (const t of totalsData) {
           totalsByCurrency[t.currency] = t.amount / 100;
         }
 
-        // Calculate chart data from the first 50 transactions
         const monthlyDataMap: Record<string, Record<string, number>> = {}; 
         for (const tx of transactions) {
           if (tx.status === "success") {
             const amount = tx.amount / 100;
-            const currency = (tx.currency || "NGN").toUpperCase();
+            const currency = (tx.currency || "KES").toUpperCase();
             const date = new Date(tx.created_at);
             const monthYear = `${date.toLocaleString('default', { month: 'short' })} ${date.getFullYear()}`;
             if (!monthlyDataMap[monthYear]) monthlyDataMap[monthYear] = {};

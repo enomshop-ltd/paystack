@@ -1,6 +1,3 @@
-export function formatCurrencyCode(currencyCode: string) {
-  // Uppercase the currency code
-  const formattedCurrencyCode = currencyCode.toUpperCase();
-
-  return formattedCurrencyCode;
+export function formatCurrencyCode(currencyCode: string): string {
+  return currencyCode.toUpperCase();
 }

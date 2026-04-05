@@ -1,4 +1,3 @@
-// src/api/store/orders/[id]/paystack-payment/route.ts
 import { MedusaRequest, MedusaResponse } from "@medusajs/framework/http";
 import { Modules } from "@medusajs/framework/utils";
 
@@ -14,21 +13,22 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
     callback_url?: string;
   };
 
-  logger.info(`[Paystack API] Received request to create partial payment for order ${order_id}. Amount: ${amount}`);
+  logger.info(
+    `[Paystack API] Received request to create partial payment for order ${order_id}. Amount: ${amount}`
+  );
 
   try {
-    // 1. Fetch order details strictly through the Query engine
     const { data: orders } = await query.graph({
       entity: "order",
       fields: [
-        "id", 
-        "currency_code", 
-        "email", 
-        "total", 
-        "payment_collections.*", 
-        "payment_collections.payments.*"
+        "id",
+        "currency_code",
+        "email",
+        "total",
+        "payment_collections.*",
+        "payment_collections.payments.*",
       ],
-      filters: { id: order_id }
+      filters: { id: order_id },
     });
 
     const order = orders[0];
@@ -43,60 +43,89 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
 
     if (!customerEmail) {
       logger.warn(`[Paystack API] No email found on order ${order_id}`);
-      return res.status(400).json({ message: "An email address is required to process Paystack payments." });
+      return res.status(400).json({
+        message: "An email address is required to process Paystack payments.",
+      });
     }
 
     if (!paymentCollection) {
-      logger.warn(`[Paystack API] No payment collection found for order ${order_id}`);
-      return res.status(400).json({ message: "No payment collection found for this order" });
+      logger.warn(
+        `[Paystack API] No payment collection found for order ${order_id}`
+      );
+      return res
+        .status(400)
+        .json({ message: "No payment collection found for this order" });
     }
 
-    // 2. Strict type calculation for the remaining balance
     const payments = paymentCollection.payments || [];
     const capturedAmount = payments.reduce((acc: number, p: any) => {
       return acc + (p.captured_at ? Number(p.amount) : 0);
     }, 0);
-    
+
     const remainingBalance = Number(order.total) - capturedAmount;
     const requestedAmount = Number(amount);
 
     if (requestedAmount > remainingBalance) {
-      logger.warn(`[Paystack API] Amount ${requestedAmount} exceeds balance ${remainingBalance} for ${order_id}`);
+      logger.warn(
+        `[Paystack API] Amount ${requestedAmount} exceeds balance ${remainingBalance} for ${order_id}`
+      );
       return res.status(400).json({
-        message: `Cannot pay more than the remaining balance. Remaining: ${remainingBalance}, Requested: ${requestedAmount}`
+        message: `Cannot pay more than the remaining balance. Remaining: ${remainingBalance}, Requested: ${requestedAmount}`,
       });
     }
 
-    // 3. Create the payment session
-    // Note: Because Medusa's standard workflows (like createPaymentSessionsWorkflow) are highly coupled 
-    // to the Cart context, appending a session to an existing Order's payment collection is cleanly 
-    // and properly handled by directly invoking the Payment Module.
     const paymentModule = req.scope.resolve(Modules.PAYMENT);
 
-    const { data: paymentProviders } = await query.graph({ entity: "payment_provider", fields: ["id", "is_installed"], });
-    console.log(paymentProviders);
-    const paymentSession = await paymentModule.createPaymentSession(paymentCollection.id, {
-      provider_id: "pp_paystack", // Corrected to match your processor's static identifier
+    // Create the payment session first so we have its ID
+    const paymentSession = await paymentModule.createPaymentSession(
+      paymentCollection.id,
+      {
+        provider_id: "pp_paystack",
+        amount: requestedAmount,
+        currency_code: order.currency_code,
+        data: {
+          email: customerEmail,
+          order_id: order.id,
+          // CRITICAL: session_id must be in the data so Paystack's initiatePayment
+          // passes it into the Paystack transaction metadata. This allows the
+          // charge.success webhook to resolve the correct payment session.
+          session_id: undefined, // will be filled below via update
+          is_partial: true,
+          callback_url,
+          ...metadata,
+        },
+      }
+    );
+
+    // Now update the session data to include its own ID so the webhook can route back
+    const updatedSession = await paymentModule.updatePaymentSession({
+      id: paymentSession.id,
       amount: requestedAmount,
       currency_code: order.currency_code,
       data: {
+        ...((paymentSession.data as Record<string, unknown>) ?? {}),
         email: customerEmail,
         order_id: order.id,
+        session_id: paymentSession.id,
         is_partial: true,
         callback_url,
         ...metadata,
       },
     });
 
-    logger.info(`[Paystack API] Successfully created payment session for order ${order_id}`);
-    
+    logger.info(
+      `[Paystack API] Created partial payment session ${paymentSession.id} for order ${order_id}`
+    );
+
     res.status(200).json({
       message: "Payment session created successfully",
-      payment_session: paymentSession
+      payment_session: updatedSession,
     });
-
   } catch (error: any) {
-    logger.error(`[Paystack API] Error creating payment session for order ${order_id}`, error);
+    logger.error(
+      `[Paystack API] Error creating payment session for order ${order_id}`,
+      error
+    );
     res.status(500).json({ message: error.message });
   }
 }
