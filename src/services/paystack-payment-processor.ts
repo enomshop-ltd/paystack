@@ -61,10 +61,9 @@ class PaystackPaymentProcessor extends AbstractPaymentProvider<PaystackPaymentPr
   protected readonly paystack: Paystack;
   protected readonly debug: boolean;
   protected readonly logger: Logger;
-  protected readonly query: any;
 
   constructor(
-    cradle: { logger: Logger; query: any } & Record<string, unknown>,
+    cradle: { logger: Logger; } & Record<string, unknown>,
     options: PaystackPaymentProcessorConfig
   ) {
     super(cradle, options);
@@ -82,7 +81,6 @@ class PaystackPaymentProcessor extends AbstractPaymentProvider<PaystackPaymentPr
     });
     this.debug = Boolean(options.debug);
     this.logger = cradle.logger;
-    this.query = cradle.query;
 
     if (this.debug) {
       this.logger.info(
@@ -135,23 +133,6 @@ class PaystackPaymentProcessor extends AbstractPaymentProvider<PaystackPaymentPr
 
     if (!baseReference) {
       if (order_id) {
-        try {
-          if (this.query) {
-            const { data: orders } = await this.query.graph({
-              entity: "order",
-              fields: ["display_id"],
-              filters: { id: order_id },
-            });
-            if (orders && orders.length > 0 && orders[0].display_id) {
-              displayIdStr = `${orders[0].display_id}-`;
-            }
-          }
-        } catch (e) {
-          if (this.debug)
-            this.logger.warn(
-              `PS_P_Debug: Could not fetch order ${order_id} for display_id`
-            );
-        }
         baseReference = (order_id as string).replace(/^order_/, "");
       } else if (cart_id) {
         baseReference = `TX${Date.now().toString().slice(-8)}`;
@@ -485,40 +466,6 @@ class PaystackPaymentProcessor extends AbstractPaymentProvider<PaystackPaymentPr
 
     // Primary: session_id injected into Paystack metadata at transaction init time
     let session_id: string | undefined = data.metadata?.session_id;
-
-    // Fallback: for partial payments or legacy sessions where session_id wasn't
-    // forwarded into Paystack metadata, look up the payment session by reference
-    // stored in its data field (paystackTxRef).
-    if (!session_id && this.query) {
-      try {
-        const { data: sessions } = await this.query.graph({
-          entity: "payment_session",
-          fields: ["id", "data"],
-          filters: {
-            provider_id: "pp_paystack",
-          },
-        });
-
-        const matched = sessions?.find(
-          (s: any) => (s.data as any)?.paystackTxRef === reference
-        );
-
-        if (matched) {
-          session_id = matched.id;
-          if (this.debug) {
-            this.logger.info(
-              `PS_P_Debug: getWebhookActionAndData resolved session_id ${session_id} via reference lookup for ref: ${reference}`
-            );
-          }
-        }
-      } catch (e) {
-        if (this.debug) {
-          this.logger.warn(
-            `PS_P_Debug: getWebhookActionAndData reference lookup failed: ${e}`
-          );
-        }
-      }
-    }
 
     if (!session_id) {
       if (this.debug) {
