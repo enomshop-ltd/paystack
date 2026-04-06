@@ -112,7 +112,7 @@ const PaymentHistoryWidget = ({ data: order }) => {
         const reference = ((_a2 = payment.data) == null ? void 0 : _a2.paystackTxRef) || ((_b = payment.data) == null ? void 0 : _b.reference) || payment.id.slice(-8);
         return /* @__PURE__ */ jsxs(Table.Row, { children: [
           /* @__PURE__ */ jsx(Table.Cell, { className: "font-mono text-xs", children: reference }),
-          /* @__PURE__ */ jsx(Table.Cell, { children: /* @__PURE__ */ jsx(Badge, { size: "small", color: payment.provider_id === "paystack" || payment.provider_id === "pp_paystack" ? "blue" : "grey", children: payment.provider_id }) }),
+          /* @__PURE__ */ jsx(Table.Cell, { children: /* @__PURE__ */ jsx(Badge, { size: "small", color: payment.provider_id === "pp_paystack" ? "blue" : "grey", children: payment.provider_id }) }),
           /* @__PURE__ */ jsx(Table.Cell, { children: new Intl.NumberFormat("en-US", { style: "currency", currency: payment.currency_code }).format(payment.amount) }),
           /* @__PURE__ */ jsx(Table.Cell, { children: /* @__PURE__ */ jsx(Badge, { size: "small", color: payment.captured_at ? "green" : payment.canceled_at ? "red" : "orange", children: payment.captured_at ? "Captured" : payment.canceled_at ? "Canceled" : "Pending" }) }),
           /* @__PURE__ */ jsx(Table.Cell, { children: new Date(payment.created_at).toLocaleDateString() })
