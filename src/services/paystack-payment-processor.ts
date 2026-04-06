@@ -124,9 +124,9 @@ class PaystackPaymentProcessor extends AbstractPaymentProvider<PaystackPaymentPr
       throw new MedusaError(MedusaError.Types.INVALID_ARGUMENT, errorMsg);
     }
 
-    // FIX: Medusa already passes amounts in the lowest denomination (kobo/cents).
-    // Do NOT multiply by 100 — that would result in 100x overcharges.
-    const paystackAmount = Math.round(Number(amount));
+    // Medusa v2 now passes the actual decimal values (e.g., passing 4000 for 4000.00 KES instead of 400000), so we should NOT multiply by 100 here. 
+    // Paystack expects amounts in the lowest denomination, which is cents, so we multiply by 100.
+    const paystackAmount = Math.round(Number(amount) * 100);
 
     let baseReference = customMetadata?.reference;
     let displayIdStr = "";
@@ -376,9 +376,9 @@ class PaystackPaymentProcessor extends AbstractPaymentProvider<PaystackPaymentPr
         );
       }
 
-      // FIX: Medusa passes the refund amount already in the lowest denomination.
-      // Do NOT multiply by 100.
-      const refundAmount = Math.round(Number(input.amount));
+      // Medusa v2 now passes the actual decimal values (e.g., passing 4000 for 4000.00 KES instead of 400000), so we should NOT multiply by 100 here. 
+      // Paystack expects amounts in the lowest denomination, which is cents, so we multiply by 100.
+      const refundAmount = Math.round(Number(input.amount) * 100);
 
       const { data, status, message } = await this.paystack.refund.create({
         transaction: paystackTxId,
@@ -479,7 +479,7 @@ class PaystackPaymentProcessor extends AbstractPaymentProvider<PaystackPaymentPr
     // FIX: Medusa requires `amount` to be a BigNumber instance, not a plain number.
     // Also do NOT divide by 100 — Paystack sends amounts in the lowest denomination,
     // which matches what Medusa expects to store.
-    const amount = new BigNumber(data.amount);
+    const amount = new BigNumber(Number(data.amount) / 100);
 
     if (this.debug) {
       this.logger.info(

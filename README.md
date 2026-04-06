@@ -263,7 +263,7 @@ export default function PartialPaymentButton({ orderId, remainingBalance, custom
 
 ## 🛡️ 3. Production Readiness Features Explained
 
-1. **Amount Handling:** Medusa stores amounts in the lowest denomination (e.g., cents/kobo). The plugin safely passes this exact value to Paystack (`Math.round(Number(amount))`) without dangerous multipliers, preventing accidental overcharging.
+1. **Amount Handling:** Medusa v2 now passes the actual decimal values (e.g., passing 4000 for 4000.00 KES instead of 400000), while Paystack expects amounts in the lowest denomination, which is cents. The plugin safely converts the Medusa amount to cents and passes this value to Paystack (`Math.round(Number(amount) * 100)`), preventing accidental overcharging.
 2. **Cron Job Failsafe (`src/jobs/sync-paystack-payments.ts`):** 
    - Runs every 15 minutes.
    - Only checks payments older than 15 minutes to prevent race conditions with incoming webhooks.
