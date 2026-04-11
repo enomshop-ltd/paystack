@@ -351,7 +351,7 @@ class PaystackPaymentProcessor extends AbstractPaymentProvider<PaystackPaymentPr
             data: { ...input.data, paystackTxId: data.id, paystackTxData: data },
           };
       }
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error("[Paystack - authorizePayment] Caught exception", error);
       throw new MedusaError(
         MedusaError.Types.UNEXPECTED_STATE,
@@ -392,7 +392,7 @@ class PaystackPaymentProcessor extends AbstractPaymentProvider<PaystackPaymentPr
 
       this.logger.info("[Paystack - retrievePayment] Successfully retrieved payment data.");
       return { data: { ...input.data, paystackTxData: data } };
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error("[Paystack - retrievePayment] Caught exception", error);
       throw new MedusaError(
         MedusaError.Types.UNEXPECTED_STATE,
@@ -443,7 +443,7 @@ class PaystackPaymentProcessor extends AbstractPaymentProvider<PaystackPaymentPr
 
       this.logger.info(`[Paystack - refundPayment] Refund successful. Paystack Data: ${JSON.stringify(data)}`);
       return { data: { ...input.data, paystackTxData: data } };
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error("[Paystack - refundPayment] Caught exception", error);
       throw new MedusaError(
         MedusaError.Types.UNEXPECTED_STATE,
@@ -485,7 +485,7 @@ class PaystackPaymentProcessor extends AbstractPaymentProvider<PaystackPaymentPr
         default:
           return { status: PaymentSessionStatus.PENDING };
       }
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error("[Paystack - getPaymentStatus] Caught exception. Returning ERROR status.", error);
       return { status: PaymentSessionStatus.ERROR };
     }
