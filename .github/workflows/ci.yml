@@ -18,9 +18,10 @@ jobs:
         with:
           node-version: '20'
           registry-url: 'https://npmjs.org'
+          cache: 'yarn'
 
       # 1. Install dependencies
-      - run: npm ci
+      - run: yarn install --frozen-lockfile
 
       # 2. Configure Git for the bump
       - name: Git Config
