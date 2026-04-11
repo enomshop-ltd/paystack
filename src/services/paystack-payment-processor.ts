@@ -124,9 +124,14 @@ class PaystackPaymentProcessor extends AbstractPaymentProvider<PaystackPaymentPr
       throw new MedusaError(MedusaError.Types.INVALID_ARGUMENT, errorMsg);
     }
 
-    // Medusa v2 now passes the actual decimal values (e.g., passing 4000 for 4000.00 KES instead of 400000), so we should NOT multiply by 100 here. 
+    // Medusa v2 now passes the actual decimal values (e.g., passing 4000 for 4000.00 KES instead of 400000).
     // Paystack expects amounts in the lowest denomination, which is cents, so we multiply by 100.
     const paystackAmount = Math.round(Number(amount) * 100);
+    if (this.debug) {
+      this.logger.info(
+        `PS_P_Debug: original amount: ${amount} - (${Number(amount)}), paystackAmount: ${paystackAmount}, currency: ${validatedCurrencyCode}`
+      );
+    }
 
     let baseReference = customMetadata?.reference;
     let displayIdStr = "";
