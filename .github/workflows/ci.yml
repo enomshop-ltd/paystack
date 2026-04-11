@@ -31,7 +31,8 @@ jobs:
       # 3. Bump version (minor), commit, and tag
       # Use [skip ci] in the message to prevent an infinite loop
       - name: Bump Version
-        run: npm version minor -m "chore: bump version to %s [skip ci]"
+        run: |
+          npm version minor -m "chore: bump version to %s [skip ci]"
 
       # 4. Push the new version and tag back to GitHub
       - name: Push changes
