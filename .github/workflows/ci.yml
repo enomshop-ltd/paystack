@@ -1,0 +1,44 @@
+name: Bump and Publish
+on:
+  push:
+    branches: [main]
+
+jobs:
+  build-bump-publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # Needed to push the version bump back to GitHub
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://npmjs.org'
+
+      # 1. Install dependencies
+      - run: npm ci
+
+      # 2. Configure Git for the bump
+      - name: Git Config
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@://github.com"
+
+      # 3. Bump version (minor), commit, and tag
+      # Use [skip ci] in the message to prevent an infinite loop
+      - name: Bump Version
+        run: npm version minor -m "chore: bump version to %s [skip ci]"
+
+      # 4. Push the new version and tag back to GitHub
+      - name: Push changes
+        run: git push --follow-tags
+
+      # 5. Publish to npm using your secret token
+      - name: Publish to npm
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
