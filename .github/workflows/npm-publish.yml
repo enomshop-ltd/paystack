@@ -5,7 +5,7 @@ name: paystack plugin
 
 on:
   release:
-    types: [created]
+    types: [published]
 
 jobs:
   build:
@@ -28,6 +28,12 @@ jobs:
           node-version: 20
           registry-url: https://registry.npmjs.org/
       - run: npm ci
+      - run: npm test
+      - run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          npm version minor -m "chore: bump version to %s [skip ci]" # [skip ci] prevents loops
+          git push --follow-tags
       - run: npm publish
         env:
           NODE_AUTH_TOKEN: ${{secrets.npm_token}}
