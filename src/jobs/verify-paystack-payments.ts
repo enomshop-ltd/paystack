@@ -48,53 +48,48 @@ export default async function verifyPaystackPayments(container: MedusaContainer)
     // Process each payment collection
     for (const collection of paymentCollections) {
       for (const session of collection.payment_sessions || []) {
-        if (!session.provider_id.startsWith("pp_paystack")) continue
+        if (!session) continue
+        if (!session.provider_id?.startsWith("pp_paystack")) continue
         if (session.status !== "pending") continue
 
         try {
-          // Get payment provider
-          const provider = await paymentModule.retrieveProvider(session.provider_id)
+          // Get payment provider service
+          const paystackService = container.resolve(session.provider_id) as any
 
-          if (!provider) {
-            logger.warn(`Provider not found for session ${session.id}`)
+          if (!paystackService || typeof paystackService.retrievePayment !== "function") {
+            logger.info(`Provider not found for session ${session.id}`)
             continue
           }
 
           // Retrieve updated payment status from Paystack
-          const result = await provider.retrievePayment(session.data)
-
-          if ("error" in result) {
-            logger.warn(`Failed to retrieve payment for session ${session.id}:`, result.error)
-            failedCount++
-            continue
-          }
-
-          const paymentData = result.data as any
+          const paymentData = await paystackService.retrievePayment(session.data)
 
           // Check if payment is now successful
           if (paymentData.status === "success" || paymentData.status === "authorized") {
-            // Authorize the payment
-            const authResult = await provider.authorizePayment(session.data, {})
+            // Authorize the payment using v2 input/output types
+            const authResult = await paystackService.authorizePayment({
+              data: session.data,
+              context: {},
+            })
 
-            if (!("error" in authResult)) {
-              // Update payment session
-              await paymentModule.updatePaymentSession(session.id, {
-                data: authResult.data,
-                status: "authorized",
-              })
+            // Update payment session using the correct v2 method signature
+            // updatePaymentSession requires currency_code and amount
+            await paymentModule.updatePaymentSession({
+              id: session.id,
+              data: authResult.data,
+              status: authResult.status,
+              currency_code: (session as any).currency_code || "USD",
+              amount: (session as any).amount || 0,
+            })
 
-              logger.info(`Successfully verified and authorized payment session ${session.id}`)
-              verifiedCount++
+            logger.info(`Successfully verified and authorized payment session ${session.id}`)
+            verifiedCount++
 
-              // If cart exists and is not completed, complete it
-              // This is handled automatically by Medusa when payment is authorized
-            } else {
-              logger.warn(`Authorization failed for session ${session.id}:`, authResult.error)
-              failedCount++
-            }
+            // If cart exists and is not completed, complete it
+            // This is handled automatically by Medusa when payment is authorized
           }
         } catch (error: any) {
-          logger.error(`Error processing payment session ${session.id}:`, error)
+          logger.error(error)
           failedCount++
         }
 
@@ -105,7 +100,7 @@ export default async function verifyPaystackPayments(container: MedusaContainer)
 
     logger.info(`Paystack payment verification completed: ${verifiedCount} verified, ${failedCount} failed`)
   } catch (error: any) {
-    logger.error("Paystack payment verification job failed:", error)
+    logger.error(error)
     throw error
   }
 }

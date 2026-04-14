@@ -1,5 +1,25 @@
-import { AbstractPaymentProvider, BigNumber, PaymentActions } from "@medusajs/framework/utils"
-import { Logger, PaymentProviderError, PaymentProviderSessionResponse, PaymentSessionStatus, ProviderWebhookPayload, WebhookActionResult } from "@medusajs/framework/types"
+import { AbstractPaymentProvider, BigNumber, PaymentActions, PaymentSessionStatus } from "@medusajs/framework/utils"
+import { 
+  Logger, 
+  ProviderWebhookPayload, 
+  WebhookActionResult,
+  InitiatePaymentInput,
+  InitiatePaymentOutput,
+  UpdatePaymentInput,
+  UpdatePaymentOutput,
+  DeletePaymentInput,
+  DeletePaymentOutput,
+  AuthorizePaymentInput,
+  AuthorizePaymentOutput,
+  CapturePaymentInput,
+  CapturePaymentOutput,
+  RefundPaymentInput,
+  RefundPaymentOutput,
+  CancelPaymentInput,
+  CancelPaymentOutput,
+  GetPaymentStatusInput,
+  GetPaymentStatusOutput
+} from "@medusajs/framework/types"
 import axios, { AxiosInstance } from "axios"
 import crypto from "crypto"
 
@@ -199,18 +219,22 @@ class PaystackProviderService extends AbstractPaymentProvider<PaystackOptions> {
   /**
    * Verify webhook signature
    */
-  verifyWebhookSignature(payload: ProviderWebhookPayload): boolean {
+  verifyWebhookSignature(
+    headers: Record<string, any>,
+    body: any,
+    rawBody: string | Buffer | undefined
+  ): boolean {
     try {
       const hash = crypto
         .createHmac("sha512", this.options_.secretKey)
-        .update(JSON.stringify(payload.rawData))
+        .update(typeof rawBody === "string" ? rawBody : JSON.stringify(body))
         .digest("hex")
 
-      const signature = payload.headers["x-paystack-signature"]
+      const signature = headers["x-paystack-signature"]
 
       return hash === signature
     } catch (error) {
-      this.logger_.error("Failed to verify webhook signature", error)
+      this.logger_.error(error as Error)
       return false
     }
   }
@@ -219,41 +243,30 @@ class PaystackProviderService extends AbstractPaymentProvider<PaystackOptions> {
    * Initialize payment session
    */
   async initiatePayment(
-    context: any
-  ): Promise<PaymentProviderError | PaymentProviderSessionResponse> {
+    input: InitiatePaymentInput
+  ): Promise<InitiatePaymentOutput> {
     try {
-      const { amount, currency_code: currency, email, context: additionalContext } = context
+      const { amount, currency_code: currency, context } = input
 
-      this.logger_.info("[Paystack] Initiating payment", {
-        amount,
-        currency,
-        email,
-        cart_id: additionalContext?.cart_id,
-      })
+      this.logger_.info(`[Paystack] Initiating payment for ${amount} ${currency}`)
 
       // Validate currency
       if (!this.isCurrencySupported(currency)) {
-        this.logger_.warn("[Paystack] Unsupported currency attempted", { currency })
-        return {
-          error: `Currency ${currency} is not supported by Paystack`,
-          code: "unsupported_currency",
-          detail: {
-            supported_currencies: PaystackProviderService.SUPPORTED_CURRENCIES,
-          },
-        }
+        this.logger_.info(`[Paystack] Unsupported currency attempted: ${currency}`)
+        throw new Error(`Currency ${currency} is not supported by Paystack. Supported: ${PaystackProviderService.SUPPORTED_CURRENCIES.join(", ")}`)
       }
 
       const numericAmount = new BigNumber(amount).numeric
       const amountInKobo = this.toPaystackAmount(numericAmount)
 
-      this.logger_.debug("[Paystack] Amount conversion", {
-        original: numericAmount,
-        kobo: amountInKobo,
-        currency,
-      })
-
       // Generate unique reference
       const reference = this.generateReference()
+
+      // Access context properties safely
+      const contextData = context as any
+      const customerEmail = contextData?.email || contextData?.customer?.email || "guest@example.com"
+      const cartId = contextData?.cart_id
+      const customerId = contextData?.customer?.id
 
       // Initialize transaction with Paystack
       const response = await this.client_.post<PaystackInitializeResponse>(
@@ -262,20 +275,16 @@ class PaystackProviderService extends AbstractPaymentProvider<PaystackOptions> {
           reference,
           amount: amountInKobo,
           currency: currency.toUpperCase(),
-          email: email || additionalContext?.customer?.email || "guest@example.com",
+          email: customerEmail,
           metadata: {
-            cart_id: additionalContext?.cart_id,
-            customer_id: additionalContext?.customer?.id,
+            cart_id: cartId,
+            customer_id: customerId,
           },
         }
       )
 
       if (!response.data.status) {
-        return {
-          error: response.data.message || "Failed to initialize payment",
-          code: "initialization_failed",
-          detail: response.data,
-        }
+        throw new Error(response.data.message || "Failed to initialize payment")
       }
 
       const paymentData: PaystackPaymentData = {
@@ -288,15 +297,12 @@ class PaystackProviderService extends AbstractPaymentProvider<PaystackOptions> {
       }
 
       return {
+        id: response.data.data.reference,
         data: paymentData,
       }
     } catch (error: any) {
       this.logger_.error("Paystack initiatePayment error:", error)
-      return {
-        error: error.message || "Failed to initiate payment",
-        code: "initialization_error",
-        detail: error.response?.data || error,
-      }
+      throw error
     }
   }
 
@@ -304,11 +310,10 @@ class PaystackProviderService extends AbstractPaymentProvider<PaystackOptions> {
    * Authorize payment (verify payment was successful)
    */
   async authorizePayment(
-    paymentSessionData: Record<string, unknown>,
-    context: Record<string, unknown>
-  ): Promise<PaymentProviderError | PaymentProviderSessionResponse> {
+    input: AuthorizePaymentInput
+  ): Promise<AuthorizePaymentOutput> {
     try {
-      const data = paymentSessionData as PaystackPaymentData
+      const data = input.data as PaystackPaymentData
 
       // Verify transaction with Paystack
       const response = await this.client_.get<PaystackVerifyResponse>(
@@ -316,22 +321,14 @@ class PaystackProviderService extends AbstractPaymentProvider<PaystackOptions> {
       )
 
       if (!response.data.status) {
-        return {
-          error: response.data.message || "Failed to verify payment",
-          code: "verification_failed",
-          detail: response.data,
-        }
+        throw new Error(response.data.message || "Failed to verify payment")
       }
 
       const transaction = response.data.data
 
       // Check if payment was successful
       if (transaction.status !== "success") {
-        return {
-          error: `Payment ${transaction.status}`,
-          code: `payment_${transaction.status}`,
-          detail: transaction,
-        }
+        throw new Error(`Payment ${transaction.status}`)
       }
 
       // Update payment data
@@ -347,11 +344,7 @@ class PaystackProviderService extends AbstractPaymentProvider<PaystackOptions> {
       }
     } catch (error: any) {
       this.logger_.error("Paystack authorizePayment error:", error)
-      return {
-        error: error.message || "Failed to authorize payment",
-        code: "authorization_error",
-        detail: error.response?.data || error,
-      }
+      throw error
     }
   }
 
@@ -359,10 +352,10 @@ class PaystackProviderService extends AbstractPaymentProvider<PaystackOptions> {
    * Capture payment (for Paystack, authorization = capture)
    */
   async capturePayment(
-    paymentData: Record<string, unknown>
-  ): Promise<PaymentProviderError | PaymentProviderSessionResponse> {
+    input: CapturePaymentInput
+  ): Promise<CapturePaymentOutput> {
     try {
-      const data = paymentData as PaystackPaymentData
+      const data = input.data as PaystackPaymentData
 
       // For Paystack, once authorized, payment is already captured
       // Just verify the status
@@ -371,11 +364,7 @@ class PaystackProviderService extends AbstractPaymentProvider<PaystackOptions> {
       )
 
       if (!response.data.status || response.data.data.status !== "success") {
-        return {
-          error: "Payment not successfully captured",
-          code: "capture_failed",
-          detail: response.data,
-        }
+        throw new Error("Payment not successfully captured")
       }
 
       const updatedData: PaystackPaymentData = {
@@ -384,16 +373,11 @@ class PaystackProviderService extends AbstractPaymentProvider<PaystackOptions> {
       }
 
       return {
-        status: PaymentSessionStatus.AUTHORIZED,
         data: updatedData,
       }
     } catch (error: any) {
       this.logger_.error("Paystack capturePayment error:", error)
-      return {
-        error: error.message || "Failed to capture payment",
-        code: "capture_error",
-        detail: error.response?.data || error,
-      }
+      throw error
     }
   }
 
@@ -401,10 +385,10 @@ class PaystackProviderService extends AbstractPaymentProvider<PaystackOptions> {
    * Cancel payment
    */
   async cancelPayment(
-    paymentData: Record<string, unknown>
-  ): Promise<PaymentProviderError | PaymentProviderSessionResponse> {
+    input: CancelPaymentInput
+  ): Promise<CancelPaymentOutput> {
     try {
-      const data = paymentData as PaystackPaymentData
+      const data = input.data as PaystackPaymentData
 
       // Paystack doesn't have an explicit cancel endpoint
       // Just mark as cancelled in our data
@@ -414,16 +398,11 @@ class PaystackProviderService extends AbstractPaymentProvider<PaystackOptions> {
       }
 
       return {
-        status: PaymentSessionStatus.CANCELED,
         data: updatedData,
       }
     } catch (error: any) {
       this.logger_.error("Paystack cancelPayment error:", error)
-      return {
-        error: error.message || "Failed to cancel payment",
-        code: "cancellation_error",
-        detail: error,
-      }
+      throw error
     }
   }
 
@@ -431,10 +410,10 @@ class PaystackProviderService extends AbstractPaymentProvider<PaystackOptions> {
    * Delete payment session
    */
   async deletePayment(
-    paymentSessionData: Record<string, unknown>
-  ): Promise<PaymentProviderError | PaymentProviderSessionResponse> {
+    input: DeletePaymentInput
+  ): Promise<DeletePaymentOutput> {
     return {
-      data: {},
+      data: input.data,
     }
   }
 
@@ -442,22 +421,22 @@ class PaystackProviderService extends AbstractPaymentProvider<PaystackOptions> {
    * Get payment status
    */
   async getPaymentStatus(
-    paymentSessionData: Record<string, unknown>
-  ): Promise<PaymentSessionStatus> {
-    const data = paymentSessionData as PaystackPaymentData
+    input: GetPaymentStatusInput
+  ): Promise<GetPaymentStatusOutput> {
+    const data = input.data as PaystackPaymentData
 
-    switch (data.status) {
+    switch (data?.status) {
       case "authorized":
       case "captured":
       case "success":
-        return PaymentSessionStatus.AUTHORIZED
+        return { status: PaymentSessionStatus.AUTHORIZED }
       case "cancelled":
-        return PaymentSessionStatus.CANCELED
+        return { status: PaymentSessionStatus.CANCELED }
       case "failed":
-        return PaymentSessionStatus.ERROR
+        return { status: PaymentSessionStatus.ERROR }
       case "pending":
       default:
-        return PaymentSessionStatus.PENDING
+        return { status: PaymentSessionStatus.PENDING }
     }
   }
 
@@ -465,11 +444,11 @@ class PaystackProviderService extends AbstractPaymentProvider<PaystackOptions> {
    * Refund payment
    */
   async refundPayment(
-    paymentData: Record<string, unknown>,
-    refundAmount: number
-  ): Promise<PaymentProviderError | PaymentProviderSessionResponse> {
+    input: RefundPaymentInput
+  ): Promise<RefundPaymentOutput> {
     try {
-      const data = paymentData as PaystackPaymentData
+      const data = input.data as PaystackPaymentData
+      const refundAmount = new BigNumber(input.amount).numeric
       const amountInKobo = this.toPaystackAmount(refundAmount)
 
       const response = await this.client_.post<PaystackRefundResponse>(
@@ -481,11 +460,7 @@ class PaystackProviderService extends AbstractPaymentProvider<PaystackOptions> {
       )
 
       if (!response.data.status) {
-        return {
-          error: response.data.message || "Failed to process refund",
-          code: "refund_failed",
-          detail: response.data,
-        }
+        throw new Error(response.data.message || "Failed to process refund")
       }
 
       return {
@@ -496,11 +471,7 @@ class PaystackProviderService extends AbstractPaymentProvider<PaystackOptions> {
       }
     } catch (error: any) {
       this.logger_.error("Paystack refundPayment error:", error)
-      return {
-        error: error.message || "Failed to refund payment",
-        code: "refund_error",
-        detail: error.response?.data || error,
-      }
+      throw error
     }
   }
 
@@ -509,7 +480,7 @@ class PaystackProviderService extends AbstractPaymentProvider<PaystackOptions> {
    */
   async retrievePayment(
     paymentSessionData: Record<string, unknown>
-  ): Promise<PaymentProviderError | PaymentProviderSessionResponse> {
+  ): Promise<Record<string, unknown>> {
     try {
       const data = paymentSessionData as PaystackPaymentData
 
@@ -518,11 +489,7 @@ class PaystackProviderService extends AbstractPaymentProvider<PaystackOptions> {
       )
 
       if (!response.data.status) {
-        return {
-          error: response.data.message || "Failed to retrieve payment",
-          code: "retrieval_failed",
-          detail: response.data,
-        }
+        throw new Error(response.data.message || "Failed to retrieve payment")
       }
 
       const transaction = response.data.data
@@ -533,16 +500,10 @@ class PaystackProviderService extends AbstractPaymentProvider<PaystackOptions> {
         paid_at: transaction.paid_at,
       }
 
-      return {
-        data: updatedData,
-      }
+      return updatedData
     } catch (error: any) {
       this.logger_.error("Paystack retrievePayment error:", error)
-      return {
-        error: error.message || "Failed to retrieve payment",
-        code: "retrieval_error",
-        detail: error.response?.data || error,
-      }
+      throw error
     }
   }
 
@@ -550,11 +511,11 @@ class PaystackProviderService extends AbstractPaymentProvider<PaystackOptions> {
    * Update payment session (e.g., amount change)
    */
   async updatePayment(
-    context: any
-  ): Promise<PaymentProviderError | PaymentProviderSessionResponse> {
+    input: UpdatePaymentInput
+  ): Promise<UpdatePaymentOutput> {
     // For amount updates, we need to create a new payment session
     // since Paystack doesn't support updating existing transactions
-    return this.initiatePayment(context)
+    return this.initiatePayment(input)
   }
 
   /**
@@ -563,7 +524,8 @@ class PaystackProviderService extends AbstractPaymentProvider<PaystackOptions> {
   async getWebhookActionAndData(
     payload: ProviderWebhookPayload["payload"]
   ): Promise<WebhookActionResult> {
-    const { event, data } = payload
+    const webhookData = payload.data as Record<string, any>
+    const event = webhookData.event as string
 
     switch (event) {
       case "charge.success":
@@ -571,8 +533,8 @@ class PaystackProviderService extends AbstractPaymentProvider<PaystackOptions> {
         return {
           action: PaymentActions.AUTHORIZED,
           data: {
-            session_id: data.reference,
-            amount: new BigNumber(this.fromPaystackAmount(data.amount)),
+            session_id: webhookData.data?.reference as string,
+            amount: new BigNumber(this.fromPaystackAmount(webhookData.data?.amount as number)),
           },
         }
 
@@ -581,7 +543,8 @@ class PaystackProviderService extends AbstractPaymentProvider<PaystackOptions> {
         return {
           action: PaymentActions.FAILED,
           data: {
-            session_id: data.reference,
+            session_id: webhookData.data?.reference as string,
+            amount: new BigNumber(this.fromPaystackAmount(webhookData.data?.amount as number)),
           },
         }
 
@@ -590,7 +553,8 @@ class PaystackProviderService extends AbstractPaymentProvider<PaystackOptions> {
         return {
           action: PaymentActions.NOT_SUPPORTED,
           data: {
-            session_id: data.transaction_reference,
+            session_id: webhookData.data?.transaction_reference as string,
+            amount: new BigNumber(0),
           },
         }
 

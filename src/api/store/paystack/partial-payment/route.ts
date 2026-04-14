@@ -1,5 +1,6 @@
 import { MedusaRequest, MedusaResponse } from "@medusajs/framework/http"
 import { ContainerRegistrationKeys, Modules, MedusaError } from "@medusajs/framework/utils"
+import { createPaymentSessionsWorkflow } from "@medusajs/medusa/core-flows"
 import PaystackProviderService from "../../../../modules/paystack/service"
 
 /**
@@ -41,8 +42,8 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
         "total",
         "payment_status",
         "payment_collections.*",
-        "payment_collections.payments.*",
-        "payment_collections.payments.data",
+        "payment_collections.payment_sessions.*",
+        "payment_collections.payment_sessions.data",
       ],
       filters: {
         id: order_id,
@@ -60,9 +61,19 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
 
     // Calculate total paid so far
     const paymentCollection = order.payment_collections?.[0]
-    const totalPaid = paymentCollection?.payments?.reduce((sum: number, payment: any) => {
-      return sum + (payment.amount || 0)
-    }, 0) || 0
+    
+    if (!paymentCollection) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        "No payment collection found for this order"
+      )
+    }
+
+    // In v2, we need to check payment_sessions, not payments directly
+    const completedSessions = paymentCollection.payment_sessions?.filter((s: any) => s.status === "captured" || s.status === "authorized") || []
+    const totalPaid = completedSessions.reduce((sum: number, session: any) => {
+      return sum + (session.amount || 0)
+    }, 0)
 
     const remaining = order.total - totalPaid
 
@@ -90,60 +101,53 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
       )
     }
 
-    // Get the original Paystack payment to retrieve authorization
-    const paystackPayment = paymentCollection?.payments?.find((p: any) =>
-      p.provider_id?.startsWith("pp_paystack")
+    // Get the original Paystack payment session to retrieve authorization
+    const paystackSession = paymentCollection.payment_sessions?.find((s: any) =>
+      s.provider_id?.startsWith("pp_paystack")
     )
 
-    if (!paystackPayment) {
+    if (!paystackSession) {
       throw new MedusaError(
         MedusaError.Types.NOT_FOUND,
         "Original Paystack payment not found for this order"
       )
     }
 
-    // Resolve payment module to get the provider
-    const paymentModule = req.scope.resolve(Modules.PAYMENT)
-    const provider = await paymentModule.retrieveProvider(paystackPayment.provider_id) as PaystackProviderService
+    const providerId = paystackSession.provider_id
 
     // Get the payment data which should contain authorization code
-    const paymentData = paystackPayment.data as any
-    
-    // Check if we have an authorization code from the original payment
-    // This would be available if the customer used a card payment
-    const authorizationCode = paymentData.authorization_code
+    const sessionData = paystackSession.data as any
+    const authorizationCode = sessionData.authorization_code
 
     if (!authorizationCode) {
       // If no authorization, create a new payment session for this installment
-      const reference = `${order_id}_installment_${Date.now()}`
-      
-      const response = await (provider as any).client_.post(
-        "/transaction/initialize",
-        {
-          reference,
-          amount: Math.round(amount * 100), // Convert to kobo
-          currency: order.currency_code.toUpperCase(),
-          email: customerEmail,
-          metadata: {
-            order_id: order.id,
-            is_partial_payment: true,
-            total_paid: totalPaid,
-            remaining: remaining,
+      // Using the v2 workflow to create payment session
+      const { result: newSession } = await createPaymentSessionsWorkflow(req.scope).run({
+        input: {
+          payment_collection_id: paymentCollection.id,
+          provider_id: providerId,
+          context: {
+            email: customerEmail,
+            currency_code: order.currency_code,
+            amount,
+            extra: {
+              order_id: order.id,
+              is_partial_payment: true,
+              total_paid: totalPaid,
+              remaining,
+            },
           },
-        }
-      )
+        },
+      })
 
-      if (!response.data.status) {
-        throw new MedusaError(
-          MedusaError.Types.INVALID_DATA,
-          response.data.message || "Failed to initialize payment"
-        )
-      }
+      // Resolve the Paystack provider service to get the authorization URL
+      const paystackService = req.scope.resolve(providerId) as PaystackProviderService
+      const paymentData = newSession[0]?.data as any
 
       return res.json({
         success: true,
-        authorization_url: response.data.data.authorization_url,
-        reference: response.data.data.reference,
+        authorization_url: paymentData?.authorization_url || "",
+        reference: paymentData?.reference || "",
         amount,
         remaining: remaining - amount,
       })
@@ -151,8 +155,9 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
 
     // Charge using saved authorization
     const reference = `${order_id}_installment_${Date.now()}`
+    const paystackService = req.scope.resolve(providerId) as PaystackProviderService
     
-    const chargeResult = await provider.chargeAuthorization(
+    const chargeResult = await paystackService.chargeAuthorization(
       authorizationCode,
       customerEmail,
       amount,
@@ -162,20 +167,27 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
         order_id: order.id,
         is_partial_payment: true,
         total_paid: totalPaid,
-        remaining: remaining,
+        remaining,
       }
     )
 
     if (chargeResult.data.status === "success") {
-      // Create a payment record for this installment
-      const newPayment = await paymentModule.createPayments({
-        provider_id: paystackPayment.provider_id,
-        amount,
-        currency_code: order.currency_code,
-        payment_collection_id: paymentCollection.id,
-        data: {
-          reference: chargeResult.data.reference,
-          is_partial_payment: true,
+      // Create a new payment session for this installment using the v2 workflow
+      const { result: newSession } = await createPaymentSessionsWorkflow(req.scope).run({
+        input: {
+          payment_collection_id: paymentCollection.id,
+          provider_id: providerId,
+          context: {
+            email: customerEmail,
+            currency_code: order.currency_code,
+            amount,
+            extra: {
+              reference,
+              is_partial_payment: true,
+              authorization_code: authorizationCode,
+              charge_result: chargeResult.data,
+            },
+          },
         },
       })
 
@@ -183,32 +195,6 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
       const isFullyPaid = newRemaining <= 0
 
       logger.info(`[Paystack] Partial payment of ${amount} processed for order ${order_id}. Remaining: ${newRemaining}`)
-
-      // Auto-capture when fully paid
-      if (isFullyPaid) {
-        logger.info(`[Paystack] Order ${order_id} is now fully paid, capturing all payments`)
-
-        try {
-          // Capture all payments in the collection
-          for (const p of paymentCollection.payments || []) {
-            if (p.captured_at === null) {
-              await paymentModule.capturePayment({
-                payment_id: p.id,
-              })
-              logger.info(`[Paystack] Captured payment ${p.id} for order ${order_id}`)
-            }
-          }
-
-          // Capture the new payment
-          await paymentModule.capturePayment({
-            payment_id: newPayment.id,
-          })
-          logger.info(`[Paystack] Captured new partial payment ${newPayment.id} for order ${order_id}`)
-        } catch (captureError: any) {
-          logger.error(`[Paystack] Failed to auto-capture payments for order ${order_id}`, captureError)
-          // Don't fail the whole request - payment is still recorded
-        }
-      }
 
       return res.json({
         success: true,

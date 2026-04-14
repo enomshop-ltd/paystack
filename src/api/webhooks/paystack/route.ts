@@ -11,16 +11,16 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
 
   try {
     // Get the webhook payload
-    const payload = req.body
+    const payload = req.body as Record<string, any>
 
-    logger.info("Received Paystack webhook", { event: payload.event })
+    logger.info(`Received Paystack webhook: ${payload?.event || 'unknown event'}`)
 
     // The payment provider will handle webhook verification and processing
     // through the automatic /hooks/payment/paystack_paystack endpoint
 
     return res.status(200).json({ received: true })
   } catch (error: any) {
-    logger.error("Paystack webhook error:", error)
+    logger.error(error)
     return res.status(400).json({ error: error.message })
   }
 }
