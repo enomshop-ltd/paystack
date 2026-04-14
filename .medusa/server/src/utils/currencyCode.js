@@ -1,7 +1,0 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.formatCurrencyCode = formatCurrencyCode;
-function formatCurrencyCode(currencyCode) {
-    return currencyCode.toUpperCase();
-}
-//# sourceMappingURL=data:application/json;base64,eyJ2ZXJzaW9uIjozLCJmaWxlIjoiY3VycmVuY3lDb2RlLmpzIiwic291cmNlUm9vdCI6IiIsInNvdXJjZXMiOlsiLi4vLi4vLi4vLi4vc3JjL3V0aWxzL2N1cnJlbmN5Q29kZS50cyJdLCJuYW1lcyI6W10sIm1hcHBpbmdzIjoiOztBQUFBLGdEQUVDO0FBRkQsU0FBZ0Isa0JBQWtCLENBQUMsWUFBb0I7SUFDckQsT0FBTyxZQUFZLENBQUMsV0FBVyxFQUFFLENBQUM7QUFDcEMsQ0FBQyJ9
