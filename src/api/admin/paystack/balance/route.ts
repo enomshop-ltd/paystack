@@ -10,11 +10,8 @@ export async function GET(req: MedusaRequest, res: MedusaResponse) {
   const logger = req.scope.resolve(ContainerRegistrationKeys.LOGGER)
 
   try {
-    // Resolve payment module
-    const paymentModule = req.scope.resolve(Modules.PAYMENT)
-
     // Get the Paystack provider (assuming provider ID is pp_paystack_paystack)
-    const provider = await paymentModule.retrieveProvider("pp_paystack_paystack") as PaystackProviderService
+    const provider = req.scope.resolve("pp_paystack_paystack") as PaystackProviderService
 
     if (!provider) {
       return res.status(404).json({ error: "Paystack provider not found" })

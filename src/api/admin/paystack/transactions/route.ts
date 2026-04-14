@@ -16,12 +16,9 @@ export async function GET(req: MedusaRequest, res: MedusaResponse) {
       search?: string
     }
 
-    // Resolve payment module
-    const paymentModule = req.scope.resolve(Modules.PAYMENT)
-
     // Get the Paystack provider
-    const provider = await paymentModule.retrieveProvider("pp_paystack_paystack") as PaystackProviderService
-
+    const provider = req.scope.resolve("pp_paystack_paystack") as PaystackProviderService
+    
     if (!provider) {
       return res.status(404).json({ error: "Paystack provider not found" })
     }
