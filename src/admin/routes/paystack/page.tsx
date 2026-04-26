@@ -266,7 +266,6 @@ const PaystackPage = () => {
 export const config = defineRouteConfig({
   label: "Paystack",
   icon: CreditCard,
-  nested: "/payment-providers",
 })
 
 export default PaystackPage
