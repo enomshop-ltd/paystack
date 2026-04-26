@@ -102,7 +102,7 @@ module.exports = defineConfig({
           },
           // Ghana Account
           {
-            resolve: "medusa-payment-paystack",
+            resolve: "medusa-payment-paystack", 
             id: "paystack_ghana",
             options: {
               identifier: "ghana", // Creates provider ID: pp_paystack_ghana
