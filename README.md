@@ -22,11 +22,11 @@ A fully-featured Paystack payment provider plugin for Medusa v2.13.5+ with multi
 ## Installation
 
 ```bash
-npm install medusa-payment-paystack
+npm install @enomshop/paystack
 # or
-yarn add medusa-payment-paystack
+yarn add @enomshop/paystack
 # or
-pnpm add medusa-payment-paystack
+pnpm add @enomshop/paystack
 ```
 
 ## Configuration
