@@ -1,3 +1,5 @@
+import { defineRouteConfig } from "@medusajs/admin-sdk"
+import { CreditCard } from "@medusajs/icons"
 import { Container, Heading } from "@medusajs/ui"
 import { useQuery } from "@tanstack/react-query"
 import { useState, useEffect } from "react"
@@ -260,5 +262,11 @@ const PaystackPage = () => {
     </Container>
   )
 }
+
+export const config = defineRouteConfig({
+  label: "Paystack",
+  icon: CreditCard,
+  nested: "/payment-providers",
+})
 
 export default PaystackPage
