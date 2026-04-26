@@ -46,7 +46,7 @@ module.exports = defineConfig({
       options: {
         providers: [
           {
-            resolve: "@enomshop/paystack/modules/paystack",
+            resolve: "@enomshop/paystack",
             id: "paystack",
             options: {
               secret_key: process.env.PAYSTACK_SECRET_KEY,
@@ -77,7 +77,7 @@ module.exports = defineConfig({
         providers: [
           // Kenya Account
           {
-            resolve: "@enomshop/paystack/modules/paystack",
+            resolve: "@enomshop/paystack",
             id: "paystack",
             options: {
               secret_key: process.env.PAYSTACK_SECRET_KEY,
@@ -98,7 +98,7 @@ module.exports = defineConfig({
           },
           // Ghana Account
           {
-            resolve: "@enomshop/paystack/modules/paystack", 
+            resolve: "@enomshop/paystack", 
             id: "paystack_ghana",
             options: {
               identifier: "ghana", // Creates provider ID: pp_paystack_ghana
