@@ -46,7 +46,7 @@ module.exports = defineConfig({
       options: {
         providers: [
           {
-            resolve: "medusa-payment-paystack",
+            resolve: "@enomshop/paystack/providers/paystack",
             id: "paystack",
             options: {
               secret_key: process.env.PAYSTACK_SECRET_KEY,
@@ -56,6 +56,10 @@ module.exports = defineConfig({
           },
         ],
       },
+    },
+    { /* FIXED: Moved the Paystack plugin into the modules array */
+      resolve: "@enomshop/paystack",
+      options: {}
     },
   ],
 })
@@ -77,18 +81,17 @@ module.exports = defineConfig({
         providers: [
           // Kenya Account
           {
-            resolve: "medusa-payment-paystack",
-            id: "paystack_kenya",
+            resolve: "@enomshop/paystack/providers/paystack",
+            id: "paystack",
             options: {
-              identifier: "kenya", // Creates provider ID: pp_paystack_kenya
-              secret_key: process.env.PAYSTACK_SECRET_KEY_KENYA,
-              public_key: process.env.PAYSTACK_PUBLIC_KEY_KENYA,
-              webhook_secret: process.env.PAYSTACK_WEBHOOK_SECRET_KENYA,
+              secret_key: process.env.PAYSTACK_SECRET_KEY,
+              public_key: process.env.PAYSTACK_PUBLIC_KEY,
+              webhook_secret: process.env.PAYSTACK_WEBHOOK_SECRET,
             },
           },
           // Nigeria Account
           {
-            resolve: "medusa-payment-paystack",
+            resolve: "@enomshop/paystack/providers/paystack",
             id: "paystack_nigeria",
             options: {
               identifier: "nigeria", // Creates provider ID: pp_paystack_nigeria
@@ -110,6 +113,10 @@ module.exports = defineConfig({
           },
         ],
       },
+    },
+    { /* FIXED: Moved the Paystack plugin into the modules array */
+      resolve: "@enomshop/paystack",
+      options: {}
     },
   ],
 })
