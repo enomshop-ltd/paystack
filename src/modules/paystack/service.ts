@@ -30,6 +30,7 @@ type InjectedDependencies = {
 type PaystackOptions = {
   secretKey: string
   publicKey: string
+  identifier?: string  // NEW: Optional custom identifier for multi-account support
 }
 
 type PaystackPaymentData = {
@@ -175,6 +176,11 @@ class PaystackProviderService extends AbstractPaymentProvider<PaystackOptions> {
 
     this.logger_ = logger
     this.options_ = options
+
+    // NEW: Set custom identifier if provided (for multi-account support)
+    if (options.identifier) {
+      PaystackProviderService.identifier = options.identifier
+    }
 
     // Initialize Paystack API client
     this.client_ = axios.create({

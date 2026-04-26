@@ -1,656 +1,723 @@
 # Paystack Payment Provider for Medusa v2
 
-A comprehensive Paystack payment integration for Medusa v2.13.5 with admin dashboard management, partial payments, webhook support, and automatic payment verification.
+A fully-featured Paystack payment provider plugin for Medusa v2.13.5+ with multi-account support, admin dashboard integration, and comprehensive webhook handling.
 
 ## Features
 
-✅ **Full Medusa v2 Architecture Support**
-- Isolated modules with custom data models
-- File-based routing for admin and API endpoints
-- Admin SDK integration
+- **Medusa v2 Architecture**: Built specifically for Medusa v2.13.5+ using the new module system
+- **Multi-Account Support**: Configure and manage multiple Paystack accounts (different countries/businesses) in a single Medusa instance
+- **Admin Dashboard**: Built-in admin UI for viewing:
+  - Account balance
+  - Transaction history
+  - Manual payment recording
+  - Multi-account selector
+- **Webhook Support**: Automatic payment verification via Paystack webhooks
+- **Failsafe Cron Job**: Scheduled job to verify pending payments (runs every 30 minutes)
+- **Multi-Currency Support**: Supports KES, NGN, GHS, ZAR, USD, XOF, EGP, ZMW, UGX, RWF, TZS
+- **Partial Payments/Installments**: Support for split payments
+- **Standard Checkout Flow**: Seamless integration with Medusa's checkout process
+- **Security**: Built-in webhook signature verification
+- **Comprehensive Logging**: Detailed logs for debugging and monitoring
 
-✅ **Admin Dashboard (Payments > Paystack)**
-- Live account balance display across all currencies
-- Beautiful revenue graph (last 30 days)
-- Endless scroll transaction history
-- Search by Order ID or Transaction Reference
-- Order widget for recording manual payments
+## Installation
 
-✅ **Webhook Support**
-- Secure HMAC SHA512 signature verification
-- Automatic order completion on successful payment
-- Handles `charge.success`, `charge.failed`, and `refund.processed` events
+```bash
+npm install medusa-payment-paystack
+# or
+yarn add medusa-payment-paystack
+# or
+pnpm add medusa-payment-paystack
+```
 
-✅ **Failsafe Cron Job**
-- Runs every 15 minutes to verify pending payments
-- Catches missed webhooks
-- Rate-limiting and race-condition prevention
+## Configuration
 
-✅ **Multi-Currency Support**
-- Supports KES, NGN, GHS, ZAR, USD, XOF, EGP, ZMW, UGX, RWF, TZS
-- Automatic currency validation
+### Single Account Setup
 
-✅ **Partial Payments / Installments**
-- Custom storefront API for multiple payments on a single order
-- Works for both registered users and guest customers
-- Uses saved authorization codes when available
-- Admin widget for recording manual payments
-- Overpayment prevention
-- Auto-capture when fully paid
-
-✅ **Standard Checkout Flow**
-- Seamless integration with Medusa checkout
-- Paystack popup integration
-- Correct amount handling (KES 4000 = KES 4000, not KES 40)
-
-✅ **Security**
-- Webhook signature verification
-- Environment variable-based configuration
-- Secure credential handling
-
-✅ **Comprehensive Logging**
-- Prefixed with `[Paystack]` for easy filtering
-- INFO, WARN, ERROR, and DEBUG levels
-- Full payment lifecycle tracking
-
-## Installation & Integration
-
-### Backend Installation
-
-The Paystack provider is already integrated into your Medusa backend. Here's what's included:
-
-**1. Payment Provider Module** (`src/modules/paystack/`)
-- Full payment lifecycle management
-- Multi-currency support
-- Webhook verification
-- Partial payment support
-
-**2. Admin Routes** (`src/api/admin/paystack/`)
-- `/admin/paystack/balance` - Account balance
-- `/admin/paystack/transactions` - Transaction history
-- `/admin/paystack/record-manual-payment` - Record manual payments
-
-**3. Store Routes** (`src/api/store/paystack/`)
-- `/store/paystack/partial-payment` - Partial payment endpoint
-
-**4. Webhooks** (`src/api/webhooks/paystack/`)
-- Automatic webhook handling at `/hooks/payment/paystack_paystack`
-
-**5. Scheduled Jobs** (`src/jobs/`)
-- Payment verification job (runs every 15 minutes)
-
-**6. Admin Dashboard**
-- Admin page at "Payments > Paystack" (`src/admin/routes/paystack/`)
-- Order widget for partial payments (`src/admin/widgets/order-partial-payment.tsx`)
-
-### Configuration Steps
-
-1. **Get your Paystack API keys** from https://dashboard.paystack.com/#/settings/developer
-   - Secret Key (starts with `sk_`)
-   - Public Key (starts with `pk_`)
-
-2. **Environment variables are already configured:**
-   - `PAYSTACK_SECRET_KEY` - Your Paystack secret key
-   - `PAYSTACK_PUBLIC_KEY` - Your Paystack public key
-
-3. **Configure your Paystack webhook URL** in the Paystack dashboard:
-   - URL: `https://your-backend-domain.com/hooks/payment/paystack_paystack`
-   - Events: Select all payment events (`charge.*` and `refund.*`)
-   - The webhook signature will be verified automatically using your secret key
-
-4. **Enable the provider in your regions**:
-   - Go to Settings > Regions in your Medusa admin
-   - Edit a region (e.g., "Kenya")
-   - Under "Payment Providers", enable "Paystack"
-   - The provider ID is `pp_paystack_paystack`
-
-### Admin Dashboard Access
-
-After installation, access the Paystack management dashboard:
-
-1. Log in to your Medusa admin
-2. Navigate to **Payments > Paystack** in the sidebar
-3. View:
-   - Live account balance across all currencies
-   - Revenue chart (last 30 days)
-   - Transaction history with search
-   - Endless scroll pagination
-
-### Recording Manual Payments
-
-On any order details page, you'll see a "Partial Payments" widget:
-
-1. Click "Record Manual Payment"
-2. Enter amount, reference code (e.g., MPESA-ABC123), and notes
-3. Click "Record Payment"
-4. The system prevents overpayments automatically
-5. When fully paid, the order is auto-captured
-
-## How to Use
-
-### Standard Checkout
-
-1. Customer proceeds to checkout
-2. On the payment step, selects "Paystack"
-3. Clicks "Continue to Payment"
-4. Paystack popup opens
-5. Customer completes payment
-6. Order is automatically created
-
-### Manual Payments (Pay on Delivery, Cash, Bank Transfer, etc.)
-
-Admins can record manual payments made outside of Paystack directly from the order details page:
-
-1. Navigate to an order in the admin dashboard
-2. Scroll to the "Partial Payments" widget
-3. Click "Record Manual Payment"
-4. Enter the amount, payment reference (e.g., MPESA-ABC123, CASH-456), and optional notes
-5. Click "Record Payment"
-
-**Overpayment Prevention**: The system prevents recording payments that exceed the remaining balance.
-
-**Auto-Capture**: When the total payments equal or exceed the order total, all payments are automatically captured and the order is marked as paid.
-
-### Partial Payments / Installments (Storefront Integration)
-
-Customers can pay for an order in multiple installments. Here's how to integrate this feature into your storefront:
-
-#### API Endpoint
+Add to your `medusa-config.ts`:
 
 ```typescript
-POST /store/paystack/partial-payment
+import { Modules } from "@medusajs/framework/utils"
+
+module.exports = defineConfig({
+  // ... other config
+  modules: [
+    {
+      resolve: "@medusajs/medusa/payment",
+      options: {
+        providers: [
+          {
+            resolve: "medusa-payment-paystack",
+            id: "paystack",
+            options: {
+              secret_key: process.env.PAYSTACK_SECRET_KEY,
+              public_key: process.env.PAYSTACK_PUBLIC_KEY,
+              webhook_secret: process.env.PAYSTACK_WEBHOOK_SECRET,
+            },
+          },
+        ],
+      },
+    },
+  ],
+})
 ```
 
-**Request Body:**
+### Multi-Account Setup
+
+Configure multiple Paystack accounts for different regions or businesses:
+
 ```typescript
-{
-  "order_id": string,        // The order ID
-  "amount": number,          // Amount in major units (e.g., 2000 for KES 2000)
-  "email"?: string          // Required for guest customers
-}
+import { Modules } from "@medusajs/framework/utils"
+
+module.exports = defineConfig({
+  // ... other config
+  modules: [
+    {
+      resolve: "@medusajs/medusa/payment",
+      options: {
+        providers: [
+          // Kenya Account
+          {
+            resolve: "medusa-payment-paystack",
+            id: "paystack_kenya",
+            options: {
+              identifier: "kenya", // Creates provider ID: pp_paystack_kenya
+              secret_key: process.env.PAYSTACK_SECRET_KEY_KENYA,
+              public_key: process.env.PAYSTACK_PUBLIC_KEY_KENYA,
+              webhook_secret: process.env.PAYSTACK_WEBHOOK_SECRET_KENYA,
+            },
+          },
+          // Nigeria Account
+          {
+            resolve: "medusa-payment-paystack",
+            id: "paystack_nigeria",
+            options: {
+              identifier: "nigeria", // Creates provider ID: pp_paystack_nigeria
+              secret_key: process.env.PAYSTACK_SECRET_KEY_NIGERIA,
+              public_key: process.env.PAYSTACK_PUBLIC_KEY_NIGERIA,
+              webhook_secret: process.env.PAYSTACK_WEBHOOK_SECRET_NIGERIA,
+            },
+          },
+          // Ghana Account
+          {
+            resolve: "medusa-payment-paystack",
+            id: "paystack_ghana",
+            options: {
+              identifier: "ghana", // Creates provider ID: pp_paystack_ghana
+              secret_key: process.env.PAYSTACK_SECRET_KEY_GHANA,
+              public_key: process.env.PAYSTACK_PUBLIC_KEY_GHANA,
+              webhook_secret: process.env.PAYSTACK_WEBHOOK_SECRET_GHANA,
+            },
+          },
+        ],
+      },
+    },
+  ],
+})
 ```
 
-**Response:**
-```typescript
-{
-  "success": true,
-  "authorization_url": string,  // Paystack checkout URL
-  "reference": string,          // Payment reference
-  "amount": number,             // Amount paid
-  "remaining": number,          // Remaining balance
-  "fully_paid": boolean         // Whether order is now fully paid
-}
+### Environment Variables
+
+Create a `.env` file in your Medusa backend root:
+
+**Single Account:**
+```env
+PAYSTACK_SECRET_KEY=sk_test_xxxxxxxxxxxxx
+PAYSTACK_PUBLIC_KEY=pk_test_xxxxxxxxxxxxx
+PAYSTACK_WEBHOOK_SECRET=whsec_xxxxxxxxxxxxx
 ```
 
-#### Storefront Example - Order Details Page
+**Multi-Account:**
+```env
+# Kenya
+PAYSTACK_SECRET_KEY_KENYA=sk_test_xxxxxxxxxxxxx
+PAYSTACK_PUBLIC_KEY_KENYA=pk_test_xxxxxxxxxxxxx
+PAYSTACK_WEBHOOK_SECRET_KENYA=whsec_xxxxxxxxxxxxx
 
-Add this component to your order details page to allow customers to make partial payments:
+# Nigeria
+PAYSTACK_SECRET_KEY_NIGERIA=sk_test_xxxxxxxxxxxxx
+PAYSTACK_PUBLIC_KEY_NIGERIA=pk_test_xxxxxxxxxxxxx
+PAYSTACK_WEBHOOK_SECRET_NIGERIA=whsec_xxxxxxxxxxxxx
 
-```tsx
-import { useState } from "react"
-import { sdk } from "../lib/config"
-
-export function PartialPaymentButton({ order }: { order: any }) {
-  const [isLoading, setIsLoading] = useState(false)
-  const [amount, setAmount] = useState("")
-
-  // Calculate remaining balance
-  const totalPaid = order.payment_collections?.[0]?.payments?.reduce(
-    (sum: number, payment: any) => sum + (payment.amount || 0),
-    0
-  ) || 0
-  const remaining = order.total - totalPaid
-
-  const handlePartialPayment = async () => {
-    if (!amount || parseFloat(amount) <= 0) {
-      alert("Please enter a valid amount")
-      return
-    }
-
-    const paymentAmount = parseFloat(amount)
-
-    if (paymentAmount > remaining) {
-      alert(`Amount exceeds remaining balance of ${remaining}`)
-      return
-    }
-
-    setIsLoading(true)
-
-    try {
-      const response = await sdk.client.fetch("/store/paystack/partial-payment", {
-        method: "POST",
-        body: JSON.stringify({
-          order_id: order.id,
-          amount: paymentAmount,
-          email: order.email,
-        }),
-      })
-
-      if (response.success && response.authorization_url) {
-        // Redirect to Paystack checkout
-        window.location.href = response.authorization_url
-      }
-    } catch (error) {
-      console.error("Partial payment error:", error)
-      alert("Failed to process partial payment")
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
-  if (remaining <= 0) {
-    return <p>Order is fully paid</p>
-  }
-
-  return (
-    <div className="partial-payment">
-      <h3>Pay in Installments</h3>
-      <p>Remaining Balance: {remaining} {order.currency_code.toUpperCase()}</p>
-      
-      <input
-        type="number"
-        placeholder="Enter amount"
-        value={amount}
-        onChange={(e) => setAmount(e.target.value)}
-        max={remaining}
-        min="1"
-        step="1"
-      />
-      
-      <button onClick={handlePartialPayment} disabled={isLoading}>
-        {isLoading ? "Processing..." : "Pay Now"}
-      </button>
-    </div>
-  )
-}
+# Ghana
+PAYSTACK_SECRET_KEY_GHANA=sk_test_xxxxxxxxxxxxx
+PAYSTACK_PUBLIC_KEY_GHANA=pk_test_xxxxxxxxxxxxx
+PAYSTACK_WEBHOOK_SECRET_GHANA=whsec_xxxxxxxxxxxxx
 ```
 
-#### Integration with Manual Payments
+### Webhook Configuration
 
-The partial payment feature works seamlessly with manual payments:
+Configure webhooks in your Paystack Dashboard for each account:
 
-1. A customer starts an order and pays 50% online via Paystack
-2. Admin records the remaining 50% as a manual payment (e.g., paid via M-PESA)
-3. The system auto-captures all payments and marks the order as complete
+**Single Account:**
+- Webhook URL: `https://your-backend-url.com/hooks/payment/paystack_paystack`
 
-Or vice versa:
-1. Customer pays 50% via mobile money (admin records it manually)
-2. Customer pays remaining 50% via the storefront partial payment API
-3. Order automatically completes when fully paid
+**Multi-Account:**
+- Kenya: `https://your-backend-url.com/hooks/payment/paystack_kenya`
+- Nigeria: `https://your-backend-url.com/hooks/payment/paystack_nigeria`
+- Ghana: `https://your-backend-url.com/hooks/payment/paystack_ghana`
+
+Select the following events:
+- `charge.success`
+- `charge.failed`
+
+### Enable in Regions
+
+After installation, enable the payment provider in your regions:
+
+1. Go to Settings → Regions in your Medusa Admin
+2. Edit each region
+3. Add the payment provider:
+   - **Single Account**: `pp_paystack_paystack`
+   - **Multi-Account**: `pp_paystack_kenya`, `pp_paystack_nigeria`, or `pp_paystack_ghana`
+
+## Usage
 
 ### Admin Dashboard
 
-Access the Paystack management page:
-1. Go to Payments > Paystack in the admin sidebar
-2. View your live account balance
-3. See revenue trends in the last 30 days
-4. Search and browse all transactions
-5. Scroll to load more transactions automatically
+**Single Account:**
 
-## API Endpoints
+Access Paystack features in your Medusa Admin:
+
+1. **View Balance**: Navigate to Payments → Paystack → Balance
+   - Endpoint: `GET /admin/paystack/balance`
+   
+2. **View Transactions**: Navigate to Payments → Paystack → Transactions
+   - Endpoint: `GET /admin/paystack/transactions?page=1&perPage=20`
+   
+3. **Record Manual Payment**: Use the admin UI or API
+   - Endpoint: `POST /admin/paystack/record-manual-payment`
+
+**Multi-Account:**
+
+Access account-specific features using dynamic routes:
+
+1. **View Balance**: 
+   - Kenya: `GET /admin/paystack/pp_paystack_kenya/balance`
+   - Nigeria: `GET /admin/paystack/pp_paystack_nigeria/balance`
+   - Ghana: `GET /admin/paystack/pp_paystack_ghana/balance`
+   
+2. **View Transactions**: 
+   - Kenya: `GET /admin/paystack/pp_paystack_kenya/transactions?page=1&perPage=20`
+   - Nigeria: `GET /admin/paystack/pp_paystack_nigeria/transactions?page=1&perPage=20`
+   - Ghana: `GET /admin/paystack/pp_paystack_ghana/transactions?page=1&perPage=20`
+
+**Admin UI with Account Selector:**
+
+```tsx
+// Example: Account selector in admin dashboard
+const [selectedAccount, setSelectedAccount] = useState('pp_paystack_kenya');
+
+<Select value={selectedAccount} onChange={setSelectedAccount}>
+  <option value="pp_paystack_kenya">Kenya (KES)</option>
+  <option value="pp_paystack_nigeria">Nigeria (NGN)</option>
+  <option value="pp_paystack_ghana">Ghana (GHS)</option>
+</Select>
+
+// Fetch data for selected account
+const { data } = useQuery(['balance', selectedAccount], () => 
+  fetch(`/admin/paystack/${selectedAccount}/balance`)
+);
+```
+
+### Assigning Payment Providers to Regions
+
+**Strategy 1: By Region (Geographic)**
+
+```typescript
+// Kenya region → Kenya Paystack account (KES)
+Region: Kenya
+Currency: KES
+Payment Provider: pp_paystack_kenya
+
+// Nigeria region → Nigeria Paystack account (NGN)
+Region: Nigeria
+Currency: NGN
+Payment Provider: pp_paystack_nigeria
+
+// Ghana region → Ghana Paystack account (GHS)
+Region: Ghana
+Currency: GHS
+Payment Provider: pp_paystack_ghana
+```
+
+**Strategy 2: By Sales Channel**
+
+```typescript
+// B2C Sales Channel → Main account
+Sales Channel: B2C
+Payment Provider: pp_paystack_main
+
+// B2B Sales Channel → Business account
+Sales Channel: B2B
+Payment Provider: pp_paystack_business
+
+// Wholesale Sales Channel → Wholesale account
+Sales Channel: Wholesale
+Payment Provider: pp_paystack_wholesale
+```
+
+**Strategy 3: By Product Type**
+
+```typescript
+// Digital Products → Digital-optimized account
+Product Collection: Digital Downloads
+Payment Provider: pp_paystack_digital
+
+// Physical Products → Standard account
+Product Collection: Physical Goods
+Payment Provider: pp_paystack_physical
+```
+
+### Storefront Integration
+
+The plugin works with Medusa's standard checkout flow. Here's an example using the Medusa JS SDK:
+
+```typescript
+import Medusa from "@medusajs/js-sdk"
+
+const medusa = new Medusa({ 
+  baseUrl: "http://localhost:9000",
+  publishableKey: "pk_..."
+})
+
+// 1. Add items to cart
+const cart = await medusa.store.cart.create({
+  region_id: "reg_123",
+  country_code: "ke" // Kenya
+})
+
+await medusa.store.cart.lineItem.create(cart.id, {
+  variant_id: "variant_123",
+  quantity: 1
+})
+
+// 2. Add shipping and billing info
+await medusa.store.cart.update(cart.id, {
+  email: "customer@example.com",
+  shipping_address: { /* ... */ },
+  billing_address: { /* ... */ }
+})
+
+// 3. Select payment provider (will auto-select pp_paystack_kenya for Kenya region)
+const paymentCollection = await medusa.store.payment.collection.retrieve(
+  cart.payment_collection.id
+)
+
+await medusa.store.payment.collection.initiatePaymentSession(
+  cart.payment_collection.id,
+  {
+    provider_id: "pp_paystack_kenya", // Multi-account
+    // OR
+    provider_id: "pp_paystack_paystack", // Single account
+    data: {
+      // Optional: specify payment channels
+      channels: ["card", "mobile_money"] // For Ghana mobile money, etc.
+    }
+  }
+)
+
+// 4. Complete checkout
+const order = await medusa.store.cart.complete(cart.id)
+
+// The response includes the Paystack authorization URL
+if (order.payment_collection?.payment_sessions?.[0]?.data?.authorization_url) {
+  window.location.href = order.payment_collection.payment_sessions[0].data.authorization_url
+}
+```
+
+### Partial Payments (Installments)
+
+```typescript
+// Storefront: Create partial payment
+const response = await fetch('/store/paystack/partial-payment', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    cart_id: "cart_123",
+    amount: 50000, // 500.00 in currency major units (e.g., 500 KES)
+    installment_number: 1,
+    total_installments: 3
+  })
+})
+
+const { authorization_url } = await response.json()
+window.location.href = authorization_url
+```
+
+## API Reference
 
 ### Admin Endpoints
 
-- `GET /admin/paystack/balance` - Get account balance
-- `GET /admin/paystack/transactions?page=1&per_page=50&search=order_123` - List transactions
-- `POST /admin/paystack/record-manual-payment` - Record manual payment
+**Single Account:**
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/admin/paystack/balance` | GET | Get account balance |
+| `/admin/paystack/transactions` | GET | List transactions (paginated) |
+| `/admin/paystack/record-manual-payment` | POST | Record manual/offline payment |
+
+**Multi-Account (Dynamic):**
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/admin/paystack/[provider_id]/balance` | GET | Get balance for specific account |
+| `/admin/paystack/[provider_id]/transactions` | GET | List transactions for specific account |
+| `/admin/paystack/record-manual-payment` | POST | Record manual payment (requires provider_id in body) |
+
+**Example Multi-Account Requests:**
+
+```bash
+# Get Kenya account balance
+GET /admin/paystack/pp_paystack_kenya/balance
+
+# Get Nigeria transactions
+GET /admin/paystack/pp_paystack_nigeria/transactions?page=1&perPage=20
+
+# Record manual payment for Ghana account
+POST /admin/paystack/record-manual-payment
+{
+  "provider_id": "pp_paystack_ghana",
+  "amount": 10000,
+  "reference": "MANUAL_001",
+  "customer_email": "customer@example.com"
+}
+```
 
 ### Store Endpoints
 
-- `POST /store/paystack/partial-payment` - Process partial payment / installment
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/store/paystack/partial-payment` | POST | Create partial payment/installment |
 
-### Webhook Endpoints
+### Webhook Endpoint
 
-- `POST /hooks/payment/paystack_paystack` - Automatic webhook (configured by Medusa)
-- `POST /webhooks/paystack` - Additional webhook endpoint
+**Single Account:**
+- `/hooks/payment/paystack_paystack`
+
+**Multi-Account:**
+- `/hooks/payment/paystack_kenya`
+- `/hooks/payment/paystack_nigeria`
+- `/hooks/payment/paystack_ghana`
+- `/hooks/payment/paystack_[identifier]` (dynamic based on configuration)
 
 ## Payment Provider ID
 
-When using the Paystack provider programmatically or in your code, the provider ID is:
+The payment provider is registered with the following ID pattern:
 
-```
-pp_paystack_paystack
-```
+**Single Account:**
+- Provider ID: `pp_paystack_paystack` (default when no identifier is specified)
 
-This ID is used when:
-- Filtering payment sessions
-- Checking which provider a payment used
-- Enabling the provider in regions via API
+**Multi-Account:**
+- Pattern: `pp_paystack_[identifier]`
+- Examples:
+  - `pp_paystack_kenya` (when `identifier: "kenya"`)
+  - `pp_paystack_nigeria` (when `identifier: "nigeria"`)
+  - `pp_paystack_ghana` (when `identifier: "ghana"`)
+  - `pp_paystack_business` (when `identifier: "business"`)
 
-Example:
+### Provider ID Reference Table
+
+| Configuration `identifier` | Resulting Provider ID | Use Case |
+|---------------------------|----------------------|----------|
+| (none/default) | `pp_paystack_paystack` | Single account setup |
+| `"kenya"` | `pp_paystack_kenya` | Kenya operations (KES) |
+| `"nigeria"` | `pp_paystack_nigeria` | Nigeria operations (NGN) |
+| `"ghana"` | `pp_paystack_ghana` | Ghana operations (GHS) |
+| `"main"` | `pp_paystack_main` | Main business account |
+| `"business"` | `pp_paystack_business` | B2B operations |
+| `"wholesale"` | `pp_paystack_wholesale` | Wholesale operations |
+
+Use this ID when:
+- Enabling the provider in region settings
+- Initiating payment sessions from the storefront
+- Accessing admin dashboard endpoints (multi-account)
+
+## Multi-Account Use Cases
+
+### 1. Multi-Country Operations
+
+Perfect for businesses operating in multiple African countries:
+
 ```typescript
-// Check if a payment used Paystack
-const isPaystackPayment = payment.provider_id === "pp_paystack_paystack"
+// Medusa Regions Configuration
+Regions:
+  - Kenya Region (KES) → pp_paystack_kenya
+  - Nigeria Region (NGN) → pp_paystack_nigeria
+  - Ghana Region (GHS) → pp_paystack_ghana
+  - South Africa Region (ZAR) → pp_paystack_south_africa
 
-// Filter only Paystack payments
-const paystackPayments = payments.filter(p => 
-  p.provider_id.startsWith("pp_paystack")
-)
+Benefits:
+- Separate financial reporting per country
+- Compliance with local regulations
+- Settlement in local currency
+- Country-specific payment methods (e.g., Ghana Mobile Money)
+```
+
+### 2. Multi-Brand Management
+
+Manage multiple brands under one Medusa instance:
+
+```typescript
+// Sales Channel Configuration
+Sales Channels:
+  - Brand A (premium) → pp_paystack_brand_a
+  - Brand B (budget) → pp_paystack_brand_b
+  - Brand C (wholesale) → pp_paystack_brand_c
+
+Benefits:
+- Separate accounting per brand
+- Independent settlement schedules
+- Brand-specific analytics
+```
+
+### 3. Business Model Segmentation
+
+Different payment flows for different business models:
+
+```typescript
+// Configuration
+B2C Customers → pp_paystack_retail (standard rates)
+B2B Customers → pp_paystack_corporate (corporate rates)
+Marketplace Vendors → pp_paystack_marketplace (split payments)
+
+Benefits:
+- Tailored payment processing
+- Different fee structures
+- Separate financial tracking
 ```
 
 ## Scheduled Jobs
 
-### Payment Verification Job
+The plugin includes a scheduled job for payment verification:
 
-Runs every 15 minutes to verify pending Paystack payments. Acts as a failsafe for missed webhooks.
+**File**: `src/jobs/verify-paystack-payments.ts`
 
-Location: `src/jobs/verify-paystack-payments.ts`
+**Schedule**: Runs every 30 minutes
+
+**Purpose**: Verifies pending payments that may have missed webhook notifications
+
+The job automatically works with all configured Paystack accounts, verifying payments for each provider independently.
 
 ## Currency Handling
 
-**IMPORTANT**: The provider correctly handles currency amounts:
+The plugin automatically handles currency conversion between Medusa's major units and Paystack's minor units (kobo/cents):
 
-- Medusa stores amounts in major units (e.g., 10 = $10.00)
-- Paystack requires amounts in kobo/cents (e.g., 1000 = $10.00)
-- The provider automatically converts between them
+**Supported Currencies**: KES, NGN, GHS, ZAR, USD, XOF, EGP, ZMW, UGX, RWF, TZS
 
-**No more issues with KES 4000 becoming KES 40!**
+**Example**:
+- Medusa stores: `{ amount: 1000, currency_code: "kes" }` = 1,000 KES
+- Sent to Paystack: `100000` (in cents/kobo)
+- Display to user: `KES 1,000.00`
 
-### Critical: Storefront Amount Conversion
+**No manual conversion needed** - the plugin handles this automatically.
 
-When implementing the Paystack popup in your storefront, you MUST multiply the amount by 100 before passing it to Paystack. This is because:
+## Debugging
 
-1. **Medusa stores amounts in whole units**: 50 NGN is stored as `50` in the database
-2. **Paystack expects amounts in kobo (minor units)**: 50 NGN must be sent as `5000` kobo
-
-**The Conversion Formula:**
-```typescript
-const amountInKobo = Math.round(sessionData.amount * 100)
-```
-
-**Why Math.round()?**
-- Prevents floating-point precision errors (e.g., 49.99 * 100 = 4998.999999999999)
-- Ensures you always send a whole number to Paystack
-
-**Example Implementation:**
+The plugin logs comprehensive information to help with debugging:
 
 ```typescript
-// In your storefront checkout component (e.g., paystack-container.tsx)
-const handlePayWithPaystack = () => {
-  // sessionData.amount comes from the backend payment session
-  // Example: sessionData.amount = 50 (which is 50 NGN)
-  
-  const amountInKobo = Math.round(sessionData.amount * 100)
-  // Result: 5000 (which is 50 NGN in kobo)
-  
-  const paystackOptions = {
-    key: publicKey,
-    email: cart.email,
-    amount: amountInKobo, // 5000, not 50
-    currency: sessionData.currency,
-    ref: sessionData.reference,
-    onSuccess: handlePaymentSuccess,
-    onClose: handlePaymentClose,
-  }
-  
-  // Open Paystack popup
-  const popup = new PaystackPop()
-  popup.resumeTransaction(paystackOptions.ref)
-}
+// Example log output
+[Paystack-kenya] Initializing payment for cart_123
+[Paystack-kenya] Amount: 50000 (500.00 KES)
+[Paystack-kenya] Reference: pay_abc123
+[Paystack-kenya] Customer: customer@example.com
+[Paystack-kenya] Authorization URL: https://checkout.paystack.com/xyz
+[Paystack-kenya] Webhook received: charge.success
+[Paystack-kenya] Payment verified: Reference pay_abc123
 ```
 
-**SECURITY: Always Use Backend-Controlled Amounts**
-
-The `sessionData.amount` value should ALWAYS come from the backend payment session, never from user input or client-side calculations:
-
-```typescript
-// CORRECT - Amount from backend
-const cart = await sdk.store.cart.retrieve(cartId, {
-  fields: "+payment_collection.payment_sessions.*"
-})
-const sessionData = cart.payment_collection.payment_sessions.find(
-  ps => ps.provider_id === "pp_paystack_paystack"
-)
-const amountInKobo = Math.round(sessionData.amount * 100)
-
-// WRONG - Never calculate amount on client side
-const amountInKobo = Math.round(calculateCartTotal() * 100) // DON'T DO THIS
-```
-
-**Flow Diagram:**
-
-```
-Backend (Medusa)          Storefront               Paystack API
-================          ==========               ============
-Cart Total: 50 NGN   -->  Receives: 50        -->  Receives: 5000 kobo
-(stored as 50)            Converts: 50 * 100       (requires kobo)
-                          Sends: 5000
-```
-
-**Common Mistakes to Avoid:**
-
-1. Forgetting to multiply by 100 (sends 50 instead of 5000)
-2. Multiplying backend amounts by 100 (backend already handles this)
-3. Using client-side cart totals instead of backend payment session amounts
-4. Not using Math.round() (causes decimal errors)
-
-## Supported Currencies
-
-- NGN (Nigerian Naira)
-- GHS (Ghanaian Cedi)
-- ZAR (South African Rand)
-- KES (Kenyan Shilling) ⭐ Primary
-- USD (US Dollar)
-- XOF (West African CFA franc)
-- EGP (Egyptian Pound)
-- ZMW (Zambian Kwacha)
-- UGX (Ugandan Shilling)
-- RWF (Rwandan Franc)
-- TZS (Tanzanian Shilling)
-
-## Debugging & Logs
-
-The Paystack plugin includes comprehensive logging for troubleshooting. All logs are prefixed with `[Paystack]` for easy filtering.
-
-### Log Locations
-
-**Backend logs:**
-```bash
-cd apps/backend
-tail -f logs/medusa.log | grep "\[Paystack\]"
-```
-
-### Log Levels
-
-The plugin logs at different levels:
-
-**INFO** - Key operations:
-```
-[Paystack] Initiating payment
-[Paystack] Payment authorized successfully
-[Paystack] Payment captured successfully
-[Paystack] Charge success webhook
-[Paystack] Recording manual payment for order
-[Paystack] Order is now fully paid, capturing all payments
-```
-
-**WARN** - Issues that don't break flow:
-```
-[Paystack] Unsupported currency attempted
-[Paystack] Payment not successful
-[Paystack] Charge failed webhook
-```
-
-**ERROR** - Failures:
-```
-[Paystack] Payment initialization failed
-[Paystack] Payment verification failed
-[Paystack] Payment capture failed
-[Paystack] Failed to auto-capture payments
-```
-
-**DEBUG** - Detailed info for development:
-```
-[Paystack] Amount conversion
-[Paystack] Verification response
-[Paystack] Unsupported webhook event
-```
-
-### Common Log Patterns
-
-**Successful payment flow:**
-```
-[Paystack] Initiating payment (amount: 4000, currency: KES)
-[Paystack] Amount conversion (original: 4000, kobo: 400000)
-[Paystack] Payment initiated successfully (reference: medusa_...)
-[Paystack] Processing webhook event (event: charge.success)
-[Paystack] Charge success webhook (reference: medusa_..., amount: 4000)
-[Paystack] Authorizing payment
-[Paystack] Payment authorized successfully
-[Paystack] Capturing payment
-[Paystack] Payment captured successfully
-```
-
-**Partial payment becoming full:**
-```
-[Paystack] Partial payment of 2000 processed for order_123. Remaining: 0
-[Paystack] Order order_123 is now fully paid, capturing all payments
-[Paystack] Captured payment pay_01... for order order_123
-[Paystack] Captured new partial payment pay_02... for order order_123
-```
-
-**Manual payment recorded:**
-```
-[Paystack] Recording manual payment for order order_123 (amount: 1500, reference: MPESA-XYZ)
-[Paystack] Order order_123 - Total: 4000, Paid: 2500, Remaining: 1500
-[Paystack] Manual payment recorded for order order_123
-[Paystack] Order order_123 - New Total Paid: 4000, New Remaining: 0, Fully Paid: true
-[Paystack] Order order_123 is now fully paid, capturing payment
-```
+Check your Medusa backend logs for detailed payment flow information. Each account is prefixed with `[Paystack-{identifier}]` for easy filtering.
 
 ## Development
 
-### Testing Webhooks Locally
+### Local Webhook Testing
 
-Use a tool like ngrok to expose your local server:
+Use ngrok to test webhooks locally:
 
 ```bash
+# Start ngrok
 ngrok http 9000
-```
 
-Then configure the ngrok URL in your Paystack dashboard:
-```
+# Update webhook URL in Paystack Dashboard
+# Single account:
 https://your-ngrok-url.ngrok.io/hooks/payment/paystack_paystack
+
+# Multi-account:
+https://your-ngrok-url.ngrok.io/hooks/payment/paystack_kenya
+https://your-ngrok-url.ngrok.io/hooks/payment/paystack_nigeria
 ```
 
 ## File Structure
 
 ```
-apps/backend/
+medusa-payment-paystack/
 ├── src/
-│   ├── modules/paystack/
-│   │   ├── service.ts          # Payment provider implementation
-│   │   └── index.ts            # Module export
+│   ├── modules/
+│   │   └── paystack/
+│   │       ├── service.ts                    # Main payment provider service
+│   │       └── index.ts
 │   ├── api/
-│   │   ├── admin/paystack/
-│   │   │   ├── balance/route.ts                # Balance endpoint
-│   │   │   ├── transactions/route.ts           # Transactions endpoint
-│   │   │   ├── record-manual-payment/route.ts  # Manual payment recording
-│   │   │   └── middlewares.ts                  # Auth middleware
-│   │   ├── store/paystack/
-│   │   │   └── partial-payment/route.ts  # Partial payment API
-│   │   └── webhooks/paystack/route.ts    # Webhook handler
+│   │   ├── admin/
+│   │   │   └── paystack/
+│   │   │       ├── balance/
+│   │   │       │   └── route.ts             # Single-account balance (deprecated)
+│   │   │       ├── transactions/
+│   │   │       │   └── route.ts             # Single-account transactions (deprecated)
+│   │   │       ├── [provider_id]/
+│   │   │       │   ├── balance/
+│   │   │       │   │   └── route.ts         # Multi-account balance (dynamic)
+│   │   │       │   └── transactions/
+│   │   │       │       └── route.ts         # Multi-account transactions (dynamic)
+│   │   │       └── record-manual-payment/
+│   │   │           └── route.ts             # Manual payment recording
+│   │   └── store/
+│   │       └── paystack/
+│   │           └── partial-payment/
+│   │               └── route.ts             # Partial payment endpoint
 │   ├── jobs/
-│   │   └── verify-paystack-payments.ts   # Cron job
-│   └── admin/
-│       ├── lib/client.ts                     # SDK client
-│       ├── routes/paystack/page.tsx          # Admin dashboard page
-│       └── widgets/order-partial-payment.tsx # Order widget
-
-apps/storefront/
-├── src/
-│   ├── components/
-│   │   ├── paystack-container.tsx           # Paystack checkout component
-│   │   └── checkout-payment-step.tsx        # Updated payment step
-│   └── lib/utils/checkout.ts                # Updated with isPaystack()
+│   │   └── verify-paystack-payments.ts       # Scheduled verification job
+│   ├── types/
+│   │   └── index.ts                          # PaystackOptions with identifier
+│   └── index.ts
+├── package.json
+└── README.md
 ```
 
 ## Troubleshooting
 
-### Payment not completing
+### Common Issues
 
-1. Check webhook configuration in Paystack dashboard
-2. Verify webhook URL is accessible (test with curl or Postman)
-3. Check backend logs for webhook errors: `grep "webhook" logs/medusa.log`
-4. The cron job will auto-verify within 15 minutes as a failsafe
+**1. "Provider not found" error**
 
-**Debug steps:**
+**Single Account:**
+- Verify the provider ID is exactly `pp_paystack_paystack`
+- Check that the provider is enabled in your region settings
+- Ensure `medusa-payment-paystack` is properly installed
+
+**Multi-Account:**
+- Verify the provider ID matches `pp_paystack_[identifier]` pattern
+- Check the `identifier` in your `medusa-config.ts` matches the expected value
+- Ensure each account is enabled in the correct regions
+
+**2. Webhook not triggering**
+
+- Verify webhook URL is accessible from the internet
+- Check webhook secret matches in both `.env` and Paystack Dashboard
+- Ensure correct webhook URL format:
+  - Single: `/hooks/payment/paystack_paystack`
+  - Multi: `/hooks/payment/paystack_[identifier]`
+- Verify events `charge.success` and `charge.failed` are selected in Paystack Dashboard
+
+**3. Payment amount incorrect**
+
+- The plugin automatically converts between major and minor currency units
+- Medusa stores amounts in major units (e.g., 1000 = 1,000 KES)
+- Paystack expects minor units (e.g., 100000 = 1,000 KES in kobo)
+- Verify you're passing amounts in Medusa's format (major units)
+
+**4. Admin dashboard not showing Paystack data**
+
+**Single Account:**
+- Check that `/admin/paystack/balance` endpoint is accessible
+- Verify API keys are correct in `.env`
+
+**Multi-Account:**
+- Check that `/admin/paystack/[provider_id]/balance` endpoint is accessible
+- Verify you're using the correct provider ID in the URL
+- Ensure API keys for each account are correct in `.env`
+
+**5. Scheduled job not running**
+
+- Verify the job file exists at `src/jobs/verify-paystack-payments.ts`
+- Check Medusa backend logs for job execution
+- The job runs every 30 minutes by default
+- Jobs work automatically for all configured accounts
+
+**6. Wrong currency symbol displaying**
+
+- Ensure the region's currency code matches the Paystack account's supported currency
+- Kenya account (pp_paystack_kenya) should use KES currency in region settings
+- Nigeria account (pp_paystack_nigeria) should use NGN currency in region settings
+- Ghana account (pp_paystack_ghana) should use GHS currency in region settings
+
+### Multi-Account Issues
+
+**1. "Provider Not Found Error" in Multi-Account Setup**
+
 ```bash
-# Check if webhook is being received
-grep "\[Paystack\] Processing webhook event" logs/medusa.log
+# Verify providers are loaded
+curl http://localhost:9000/admin/payment-providers
 
-# Check for webhook signature failures
-grep "webhook signature" logs/medusa.log
-
-# Check for payment capture errors
-grep "Failed to auto-capture" logs/medusa.log
+# Should return:
+[
+  { "id": "pp_paystack_kenya", ... },
+  { "id": "pp_paystack_nigeria", ... },
+  { "id": "pp_paystack_ghana", ... }
+]
 ```
 
-### Amount showing incorrectly
+**2. Balance/Transactions Not Loading for Specific Account**
 
-The provider handles conversion automatically (KES 4000 = 400000 kobo). If amounts are wrong:
-
-1. Check your region's currency configuration in admin
-2. Verify product prices are in the correct currency
-3. Check logs for amount conversion: `grep "Amount conversion" logs/medusa.log`
-4. Ensure the cart total matches expected amount
-
-**Debug steps:**
 ```bash
-# Check amount conversions
-grep "\[Paystack\] Amount conversion" logs/medusa.log
+# Test direct API call
+curl -X GET http://localhost:9000/admin/paystack/pp_paystack_kenya/balance \
+  -H "Authorization: Bearer {admin_token}"
+
+# Check backend logs for:
+[Paystack-kenya] Fetching balance...
+[Paystack-kenya] Error: Invalid API key
 ```
 
-### Overpayment errors
+**3. Wrong Account Processing Payment**
 
-If customers or admins are being blocked from making payments:
+- Verify region configuration:
+  ```bash
+  # Check region payment providers
+  curl http://localhost:9000/admin/regions/reg_kenya
+  
+  # Should show:
+  {
+    "region": {
+      "id": "reg_kenya",
+      "payment_providers": [
+        { "id": "pp_paystack_kenya" }
+      ]
+    }
+  }
+  ```
 
-1. Check the current order total and paid amount in admin
-2. Verify the payment amount doesn't exceed remaining balance
-3. Check logs: `grep "exceeds remaining balance" logs/medusa.log`
+### Debug Commands
 
-### Admin page not showing
+```bash
+# Check installed providers
+npx medusa payment-providers list
 
-1. Ensure you've provided `PAYSTACK_SECRET_KEY` and `PAYSTACK_PUBLIC_KEY`
-2. Restart the backend after adding environment variables
-3. Clear browser cache and refresh
-4. Check browser console for errors
-5. Verify the admin route is registered: check `src/admin/routes/paystack/page.tsx` exists
+# Verify provider registration (multi-account)
+# Should show: pp_paystack_kenya, pp_paystack_nigeria, pp_paystack_ghana
 
-### Partial payments not auto-capturing
+# Test webhook locally
+curl -X POST http://localhost:9000/hooks/payment/paystack_kenya \
+  -H "Content-Type: application/json" \
+  -H "X-Paystack-Signature: {webhook_signature}" \
+  -d '{"event":"charge.success","data":{...}}'
 
-If payments aren't being auto-captured when the order is fully paid:
-
-1. Check logs: `grep "is now fully paid" logs/medusa.log`
-2. Look for capture errors: `grep "Failed to auto-capture" logs/medusa.log`
-3. Verify all payment collections are properly linked to the order
-4. Check that payment amounts add up correctly
-
-### Manual payment widget not showing
-
-1. Verify the widget file exists: `src/admin/widgets/order-partial-payment.tsx`
-2. Ensure the admin build completed successfully
-3. Hard refresh the browser (Ctrl+Shift+R or Cmd+Shift+R)
-4. Check for JavaScript errors in browser console
-
-### Webhook signature verification failing
-
-1. Ensure `PAYSTACK_SECRET_KEY` is correct and matches your Paystack account
-2. Check that the webhook is being sent from Paystack's servers (verify IP)
-3. Look for signature verification logs: `grep "webhook signature" logs/medusa.log`
-4. Test webhook locally with ngrok and Paystack's webhook testing tool
+# Check backend logs
+tail -f /path/to/medusa/backend.log | grep Paystack
+```
 
 ## Support
 
-For issues related to:
-- **Paystack API**: https://paystack.com/docs
-- **Medusa Framework**: https://docs.medusajs.com
-- **This Integration**: Check the code comments for implementation details
+For issues and questions:
+- GitHub Issues: [Create an issue](https://github.com/your-repo/medusa-payment-paystack/issues)
+- Medusa Discord: Join the #plugins channel
+- Paystack Support: support@paystack.com
 
 ## License
 
-MIT License - feel free to use and modify as needed.
+MIT License - see LICENSE file for details
 
 ---
 
-Built with ❤️ for Medusa v2.13.5
+**Version**: 2.0.0  
+**Medusa Version**: v2.13.5+  
+**Last Updated**: 2024
