@@ -59,9 +59,9 @@ export default defineConfig({
       options: {},
     },
   ],
-  modules: {
+  modules: [
     // 2. Register the payment provider inside the Payment Module
-    [Modules.PAYMENT]: {
+    {
       resolve: "@medusajs/medusa/payment",
       options: {
         providers: [
@@ -77,7 +77,7 @@ export default defineConfig({
         ],
       },
     },
-  },
+  ],
 })
 ```
 
@@ -108,8 +108,8 @@ export default defineConfig({
       options: {},
     },
   ],
-  modules: {
-    [Modules.PAYMENT]: {
+  modules: [
+    {
       resolve: "@medusajs/medusa/payment",
       options: {
         providers: [
@@ -149,7 +149,7 @@ export default defineConfig({
         ],
       },
     },
-  },
+  ],
 })
 ```
 
