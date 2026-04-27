@@ -7,11 +7,28 @@ export const GET = async (req: MedusaRequest, res: MedusaResponse) => {
   const { provider_id } = req.params
 
   try {
-    const provider = req.scope.resolve(`pp_paystack_${provider_id}`) as PaystackProviderService
+    // In Medusa 2, providers are often registered under `payment_provider_${provider_id}`
+    // or we can resolve it securely if we know the exact string, but let's try the common patterns
+    let provider: PaystackProviderService | undefined;
+    
+    const possibleKeys = [
+      `payment_provider_${provider_id}`,
+      `pp_${provider_id}`,
+      provider_id
+    ];
+    
+    for (const key of possibleKeys) {
+      try {
+        provider = req.scope.resolve(key) as PaystackProviderService;
+        if (provider) break;
+      } catch (e) {
+        // ignore resolution errors and try next
+      }
+    }
 
     if (!provider) {
       return res.status(404).json({
-        message: `Paystack provider '${provider_id}' not found`,
+        message: `Paystack provider '${provider_id}' not found. Be sure to check what its config id is.`,
       })
     }
 

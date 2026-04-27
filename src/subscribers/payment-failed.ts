@@ -4,12 +4,12 @@ import type {
 } from "@medusajs/framework"
 import { Modules } from "@medusajs/framework/utils"
 import { render } from "@react-email/render"
-import PaymentSuccess from "../email-templates/payment-success"
+import PaymentFailed from "../email-templates/payment-failed"
 
-export default async function paymentCapturedHandler({
+export default async function paymentFailedHandler({
   event: { data },
   container,
-}: SubscriberArgs<{ id: string }>) {
+}: SubscriberArgs<{ payment_id: string; error: string }>) {
   const notificationModuleService = container.resolve(Modules.NOTIFICATION)
   const query = container.resolve("query")
   const logger = container.resolve("logger")
@@ -32,21 +32,21 @@ export default async function paymentCapturedHandler({
         "payment_collection.order.shipping_address.phone",
       ],
       filters: {
-        id: data.id,
+        id: data.payment_id,
       },
     })
 
     const payment = payments[0]
 
     if (!payment) {
-      logger.warn(`Payment ${data.id} not found`)
+      logger.warn(`Payment ${data.payment_id} not found for failure event`)
       return
     }
 
     const order = payment.payment_collection?.order
 
     if (!order || !order.email) {
-      logger.warn(`Order or email not found for payment ${data.id}`)
+      logger.warn(`Order or email not found for failed payment ${data.payment_id}`)
       return
     }
 
@@ -64,14 +64,12 @@ export default async function paymentCapturedHandler({
 
     // Render the email template
     const html = await render(
-      PaymentSuccess({
+      PaymentFailed({
         customerName,
         orderNumber,
         amount: payment.amount,
         currencyCode: payment.currency_code,
-        paymentMethod: payment.provider_id.startsWith("pp_paystack") 
-          ? "Paystack" 
-          : "Card",
+        errorMessage: data.error || "Payment processing failed.",
       })
     )
 
@@ -82,9 +80,9 @@ export default async function paymentCapturedHandler({
     notifications.push({
       to: order.email,
       channel: "email",
-      template: "payment-success",
+      template: "payment-failed-email",
       data: {
-        subject: `Payment Successful - Order #${orderNumber}`,
+        subject: `Action Required: Payment Failed - Order #${orderNumber}`,
         html,
       },
     })
@@ -94,9 +92,9 @@ export default async function paymentCapturedHandler({
       notifications.push({
         to: customerPhone,
         channel: "sms",
-        template: "payment-success-sms",
+        template: "payment-failed-sms",
         data: {
-          message: `Payment successful! Your order #${orderNumber} for ${amountFormatted} has been confirmed. Thank you for your purchase!`,
+          message: `Your payment of ${amountFormatted} for order #${orderNumber} failed. Reason: ${data.error}. Please try again.`,
           customerName,
           orderNumber,
           amount: amountFormatted,
@@ -109,9 +107,9 @@ export default async function paymentCapturedHandler({
       notifications.push({
         to: customerPhone,
         channel: "whatsapp",
-        template: "payment-success-whatsapp",
+        template: "payment-failed-whatsapp",
         data: {
-          message: `Hi ${customerName}! Your payment of ${amountFormatted} for order #${orderNumber} was successful. We're processing your order now!`,
+          message: `Hi ${customerName}, your payment of ${amountFormatted} for order #${orderNumber} failed (${data.error}). Please update your payment method.`,
           customerName,
           orderNumber,
           amount: amountFormatted,
@@ -123,22 +121,22 @@ export default async function paymentCapturedHandler({
     notifications.push({
       to: "",
       channel: "feed",
-      template: "admin-payment-success",
+      template: "admin-payment-failed",
       data: {
-        title: "Payment Received",
-        description: `Payment of ${amountFormatted} received for order #${orderNumber}`,
+        title: "Payment Failed",
+        description: `Payment of ${amountFormatted} failed for order #${orderNumber}. Reason: ${data.error}`,
       },
     })
 
     // Send all notifications
     await notificationModuleService.createNotifications(notifications)
 
-    logger.info(`Payment success notifications sent to customer ${order.email} and admin for order ${order.id}`)
-  } catch (error) {
-    logger.error(`Error sending payment success notifications: ${error.message}`)
+    logger.info(`Payment failure notifications sent to customer ${order.email} and admin for order ${order.id}`)
+  } catch (error: any) {
+    logger.error(`Error sending payment failure notifications: ${error.message}`)
   }
 }
 
 export const config: SubscriberConfig = {
-  event: "payment.captured",
+  event: "payment.failed",
 }

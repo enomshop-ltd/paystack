@@ -6,7 +6,22 @@ export const GET = async (req: MedusaRequest, res: MedusaResponse) => {
   const queryParams = req.query
 
   try {
-    const provider = req.scope.resolve(`pp_paystack_${provider_id}`) as PaystackProviderService
+    let provider: PaystackProviderService | undefined;
+    
+    const possibleKeys = [
+      `payment_provider_${provider_id}`,
+      `pp_${provider_id}`,
+      provider_id
+    ];
+    
+    for (const key of possibleKeys) {
+      try {
+        provider = req.scope.resolve(key) as PaystackProviderService;
+        if (provider) break;
+      } catch (e) {
+        // ignore resolution errors and try next
+      }
+    }
 
     if (!provider) {
       return res.status(404).json({
