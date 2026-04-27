@@ -17,7 +17,8 @@ A fully-featured Paystack payment provider plugin for Medusa v2.13.5+ with multi
 - **Partial Payments/Installments**: Support for split payments
 - **Standard Checkout Flow**: Seamless integration with Medusa's checkout process
 - **Security**: Built-in webhook signature verification
-- **Comprehensive Logging**: Detailed logs for debugging and monitoring
+- **Comprehensive Logging**: Detailed debug and info logs throughout the service lifecycle for easier troubleshooting
+- **Query Graph Usage**: Integrated Medusa v2's new Query Graph in subscribers to fetch payment and order details seamlessly
 
 ## Installation
 
@@ -36,12 +37,31 @@ pnpm add @enomshop/paystack
 Add to your `medusa-config.ts`:
 
 ```typescript
-import { Modules } from "@medusajs/framework/utils"
+import { loadEnv, defineConfig, Modules } from "@medusajs/framework/utils"
 
-module.exports = defineConfig({
-  // ... other config
-  modules: [
+loadEnv(process.env.NODE_ENV || "development", process.cwd())
+
+export default defineConfig({
+  projectConfig: {
+    databaseUrl: process.env.DATABASE_URL,
+    http: {
+      storeCors: process.env.STORE_CORS!,
+      adminCors: process.env.ADMIN_CORS!,
+      authCors: process.env.AUTH_CORS!,
+      jwtSecret: process.env.JWT_SECRET || "supersecret",
+      cookieSecret: process.env.COOKIE_SECRET || "supersecret",
+    },
+  },
+  plugins: [
+    // 1. Register the plugin here to load admin UI, webhooks, and subscribers
     {
+      resolve: "@enomshop/paystack",
+      options: {},
+    },
+  ],
+  modules: {
+    // 2. Register the payment provider inside the Payment Module
+    [Modules.PAYMENT]: {
       resolve: "@medusajs/medusa/payment",
       options: {
         providers: [
@@ -57,7 +77,7 @@ module.exports = defineConfig({
         ],
       },
     },
-  ],
+  },
 })
 ```
 
@@ -66,28 +86,47 @@ module.exports = defineConfig({
 Configure multiple Paystack accounts for different regions or businesses:
 
 ```typescript
-import { Modules } from "@medusajs/framework/utils"
+import { loadEnv, defineConfig, Modules } from "@medusajs/framework/utils"
 
-module.exports = defineConfig({
-  // ... other config
-  modules: [
+loadEnv(process.env.NODE_ENV || "development", process.cwd())
+
+export default defineConfig({
+  projectConfig: {
+    databaseUrl: process.env.DATABASE_URL,
+    http: {
+      storeCors: process.env.STORE_CORS!,
+      adminCors: process.env.ADMIN_CORS!,
+      authCors: process.env.AUTH_CORS!,
+      jwtSecret: process.env.JWT_SECRET || "supersecret",
+      cookieSecret: process.env.COOKIE_SECRET || "supersecret",
+    },
+  },
+  plugins: [
+    // Register the plugin itself just once to load the admin UI and webhook routes
     {
+      resolve: "@enomshop/paystack",
+      options: {},
+    },
+  ],
+  modules: {
+    [Modules.PAYMENT]: {
       resolve: "@medusajs/medusa/payment",
       options: {
         providers: [
           // Kenya Account
           {
             resolve: "@enomshop/paystack",
-            id: "paystack",
+            id: "paystack_kenya",
             options: {
-              secret_key: process.env.PAYSTACK_SECRET_KEY,
-              public_key: process.env.PAYSTACK_PUBLIC_KEY,
-              webhook_secret: process.env.PAYSTACK_WEBHOOK_SECRET,
+              identifier: "kenya", // Creates provider ID: pp_paystack_kenya
+              secret_key: process.env.PAYSTACK_SECRET_KEY_KENYA,
+              public_key: process.env.PAYSTACK_PUBLIC_KEY_KENYA,
+              webhook_secret: process.env.PAYSTACK_WEBHOOK_SECRET_KENYA,
             },
           },
           // Nigeria Account
           {
-            resolve: "@enomshop/paystack/modules/paystack",
+            resolve: "@enomshop/paystack",
             id: "paystack_nigeria",
             options: {
               identifier: "nigeria", // Creates provider ID: pp_paystack_nigeria
@@ -110,9 +149,13 @@ module.exports = defineConfig({
         ],
       },
     },
-  ],
+  },
 })
 ```
+
+> **Note on `medusa-config.ts` inside the plugin source**
+> 
+> You might notice a `medusa-config.ts` file in the source repository of this plugin itself. **That file is completely ignored when you install the plugin in your project.** It only exists for local testing and development of the plugin within its own repository. You only need to edit the `medusa-config.ts` at the root of your *own* Medusa project where `medusa server` runs, as shown in the examples above.
 
 ### Environment Variables
 
@@ -719,4 +762,4 @@ MIT License - see LICENSE file for details
 
 **Version**: 2.0.0  
 **Medusa Version**: v2.13.5+  
-**Last Updated**: 2024
+**Last Updated**: 2026-04
