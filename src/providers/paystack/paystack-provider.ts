@@ -90,7 +90,8 @@ class PaystackPaymentProvider extends AbstractPaymentProvider<PaystackPaymentPro
     }
 
     const { data, amount, currency_code } = input;
-    const email = (data?.email as string) || (input.context?.email as string);
+    const contextAny = input.context as any;
+    const email = (data?.email as string) || (contextAny?.email as string) || (contextAny?.customer?.email as string) || (contextAny?.billing_address?.email as string);
     const session_id = data?.session_id as string | undefined;
 
     if (!email) {
@@ -269,7 +270,7 @@ class PaystackPaymentProvider extends AbstractPaymentProvider<PaystackPaymentPro
       // Convert Medusa refund amount back to subunit
       // Wait, we don't have currency_code directly in RefundPaymentInput, but maybe in input.data?
       // For safety, we can get currency from paystackTxData.
-      const currency = (input.data.paystackTxData as any)?.currency || "NGN";
+      const currency = (input.data?.paystackTxData as any)?.currency || "NGN";
       const paystackAmount = getPaystackAmount(Number(input.amount), currency);
 
       const response = await this.paystack.refund.create({
@@ -378,7 +379,7 @@ class PaystackPaymentProvider extends AbstractPaymentProvider<PaystackPaymentPro
       // By returning CAPTURED, Medusa natively considers it fully captured.
       action: PaymentActions.SUCCESSFUL, // Note: Medusa v2 webhook actions include SUCCESSFUL which triggers capture.
       data: {
-        session_id: sessionId,
+        session_id: sessionId || "",
         amount: data.amount, // Paystack subunit amount
         reference: data.reference,
       },

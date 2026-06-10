@@ -1,6 +1,5 @@
 import { MedusaRequest, MedusaResponse } from "@medusajs/framework/http";
 import { MedusaError } from "@medusajs/framework/utils";
-import { createPaymentCollectionWorkflow } from "@medusajs/core-flows";
 
 export const POST = async (req: MedusaRequest, res: MedusaResponse) => {
   const { id } = req.params; // Order ID
@@ -31,7 +30,6 @@ export const POST = async (req: MedusaRequest, res: MedusaResponse) => {
       // In v2, we should use the core flow or module to create a payment collection
       const paymentCollection = await paymentModuleService.createPaymentCollections({
         currency_code: order.currency_code,
-        region_id: order.region_id,
         amount: order.total,
       });
       paymentCollectionId = paymentCollection.id;
@@ -52,8 +50,11 @@ export const POST = async (req: MedusaRequest, res: MedusaResponse) => {
     );
 
     // 5. Capture the payment
+    const authorizedAny = authorizedSession as any;
+    const paymentId = authorizedAny.id || authorizedAny.payment?.id;
+
     const capturedPayment = await paymentModuleService.capturePayment({
-      payment_id: authorizedSession.payment!.id,
+      payment_id: paymentId,
       amount,
     });
 

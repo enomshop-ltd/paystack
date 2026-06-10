@@ -1,7 +1,7 @@
 import { MedusaRequest, MedusaResponse } from "@medusajs/framework/http";
 import { MedusaError, Modules } from "@medusajs/framework/utils";
-import Paystack from "../../../../../providers/paystack/services/paystack-client";
-import { getPaystackAmount } from "../../../../../providers/paystack/utils/currency";
+import Paystack from "../../../../../../providers/paystack/services/paystack-client";
+import { getPaystackAmount } from "../../../../../../providers/paystack/utils/currency";
 
 export const POST = async (req: MedusaRequest, res: MedusaResponse) => {
   const { id } = req.params; // Order ID

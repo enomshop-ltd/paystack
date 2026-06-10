@@ -1,4 +1,4 @@
-import { MedusaContainer, Logger } from "@medusajs/framework/utils";
+import { MedusaContainer, Logger } from "@medusajs/framework/types";
 
 export default async function verifyPendingPaystackPayments({
   container,
