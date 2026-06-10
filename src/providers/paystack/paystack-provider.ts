@@ -381,7 +381,6 @@ class PaystackPaymentProvider extends AbstractPaymentProvider<PaystackPaymentPro
       data: {
         session_id: sessionId || "",
         amount: data.amount, // Paystack subunit amount
-        reference: data.reference,
       },
     };
   }

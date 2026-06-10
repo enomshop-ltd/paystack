@@ -60,13 +60,14 @@ export default async function verifyPendingPaystackPayments({
             {}
         );
 
-        if (authorizedSession.status === "captured") {
+        const authorizedSessionAny = authorizedSession as any;
+        if (authorizedSessionAny.status === "captured") {
           logger.info(`Session ${session.id} successfully captured via Paystack.`);
           
           // If we successfully captured the payment session, we should make sure the payment itself is captured.
           // Wait, authorizePaymentSession returns the session. 
           // If the provider returned CAPTURED, Medusa captures it.
-        } else if (authorizedSession.status === "error") {
+        } else if (authorizedSessionAny.status === "error") {
           logger.warn(`Session ${session.id} encountered an error or failed in Paystack.`);
         } else {
           logger.info(`Session ${session.id} is still pending.`);

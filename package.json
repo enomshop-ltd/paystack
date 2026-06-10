@@ -1,5 +1,5 @@
 {
-  "name": "paystack",
+  "name": "@enomshop/paystack",
   "version": "1.25.0",
   "description": "A starter for Medusa plugins.",
   "author": "Medusa (https://medusajs.com)",
@@ -34,6 +34,7 @@
   },
   "devDependencies": {
     "@medusajs/admin-sdk": "2.15.5",
+    "@medusajs/admin-shared": "2.15.5",
     "@medusajs/cli": "2.15.5",
     "@medusajs/framework": "2.15.5",
     "@medusajs/icons": "2.15.5",
