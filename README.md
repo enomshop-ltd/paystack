@@ -34,7 +34,14 @@ npm install axios
 ## Configuration & Implementation
 
 1. **Configure the Plugin**
-Update your `medusa-config.js` to register the plugin in your `payment` module. You can register multiple providers for different accounts:
+Medusa v2 strictly requires providers to be natively registered in the Awilix Dependency Injection container. To use multiple Paystack accounts natively, you MUST define your custom identifiers via the `PAYSTACK_ACCOUNTS` environment variable before registering them in the config.
+
+In your Medusa `.env` file:
+```env
+PAYSTACK_ACCOUNTS="paystack_kenya,paystack_nigeria"
+```
+
+Then, update your `medusa-config.js` or `medusa-config.ts` to register the plugin using those exact IDs:
 
 ```javascript
 module.exports = defineConfig({
@@ -45,14 +52,14 @@ module.exports = defineConfig({
       options: {
         providers: [
           {
-            resolve: "medusa-payment-paystack-v2",
+            resolve: "@enomshop/paystack",
             id: "paystack_kenya",
             options: {
               secret_key: process.env.PAYSTACK_SECRET_KEY_KE,
             }
           },
           {
-            resolve: "medusa-payment-paystack-v2",
+            resolve: "@enomshop/paystack",
             id: "paystack_nigeria",
             options: {
               secret_key: process.env.PAYSTACK_SECRET_KEY_NG,
@@ -73,15 +80,17 @@ In your Paystack dashboard, set your webhook URL for each region appropriately. 
 3. **Storefront Dynamic Provider Routing (Multi-Website)**
 If you are running multiple storefronts connected to the same Medusa backend (e.g. Website A and Website B) in the same Region, you can force each website to exclusively use its own Paystack account without code changes!
 
+*Note: Medusa automatically prefixes all custom payment provider IDs with `pp_` when exposing them via the API. Your storefront must match this prefix.*
+
 In your FreshJS Storefront `.env` for Website A:
 ```env
 # Format: "provider_id:Display Name"
-PAYMENT_PROVIDERS="paystack_siteA:Paystack,pp_system_default:Pay on Delivery"
+PAYMENT_PROVIDERS="pp_paystack_siteA:Paystack,pp_system_default:Pay on Delivery"
 ```
 
 In your FreshJS Storefront `.env` for Website B:
 ```env
-PAYMENT_PROVIDERS="paystack_siteB:Paystack,pp_system_default:Pay on Delivery"
+PAYMENT_PROVIDERS="pp_paystack_siteB:Paystack,pp_system_default:Pay on Delivery"
 ```
 The storefront will automatically ignore the other region-wide providers and dynamically bind to the correct backend instance!
 
