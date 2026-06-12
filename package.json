@@ -1,13 +1,15 @@
 {
   "name": "@enomshop/paystack",
-  "version": "1.33.0",
+  "version": "1.34.0",
   "description": "A starter for Medusa plugins.",
   "author": "Medusa (https://medusajs.com)",
   "license": "MIT",
   "files": [
     ".medusa/server"
   ],
+  "main": "./.medusa/server/src/index.js",
   "exports": {
+    ".": "./.medusa/server/src/index.js",
     "./package.json": "./package.json",
     "./workflows": "./.medusa/server/src/workflows/index.js",
     "./.medusa/server/src/modules/*": "./.medusa/server/src/modules/*/index.js",
