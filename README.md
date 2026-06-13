@@ -34,14 +34,9 @@ npm install axios
 ## Configuration & Implementation
 
 1. **Configure the Plugin**
-Medusa v2 strictly requires providers to be natively registered in the Awilix Dependency Injection container. To use multiple Paystack accounts natively, you MUST define your custom identifiers via the `PAYSTACK_ACCOUNTS` environment variable before registering them in the config.
+Update your `medusa-config.js` to register the plugin in your `payment` module. You can register multiple providers for different accounts by assigning them unique `id`s. 
 
-In your Medusa `.env` file:
-```env
-PAYSTACK_ACCOUNTS="paystack_kenya,paystack_nigeria"
-```
-
-Then, update your `medusa-config.js` or `medusa-config.ts` to register the plugin using those exact IDs:
+*Important Note on Provider IDs in Medusa V2*: Medusa dynamically creates the final provider ID by concatenating your config `id` with the plugin's internal identifier (`paystack`). So if you use `id: "apple_4all"`, the final provider ID will be **`apple_4all_paystack`**.
 
 ```javascript
 module.exports = defineConfig({
@@ -53,14 +48,14 @@ module.exports = defineConfig({
         providers: [
           {
             resolve: "@enomshop/paystack",
-            id: "paystack_kenya",
+            id: "apple_4all", // Resulting ID: apple_4all_paystack
             options: {
               secret_key: process.env.PAYSTACK_SECRET_KEY_KE,
             }
           },
           {
             resolve: "@enomshop/paystack",
-            id: "paystack_nigeria",
+            id: "urbandevicecare", // Resulting ID: urbandevicecare_paystack
             options: {
               secret_key: process.env.PAYSTACK_SECRET_KEY_NG,
             }
@@ -80,17 +75,17 @@ In your Paystack dashboard, set your webhook URL for each region appropriately. 
 3. **Storefront Dynamic Provider Routing (Multi-Website)**
 If you are running multiple storefronts connected to the same Medusa backend (e.g. Website A and Website B) in the same Region, you can force each website to exclusively use its own Paystack account without code changes!
 
-*Note: Medusa automatically prefixes all custom payment provider IDs with `pp_` when exposing them via the API. Your storefront must match this prefix.*
+*Note: Medusa automatically prefixes all custom payment provider IDs with `pp_` when exposing them via the API. Your storefront must match this prefix. Also remember that the base ID is `{config_id}_paystack`!*
 
-In your FreshJS Storefront `.env` for Website A:
+In your FreshJS Storefront `.env` for Apple-4All:
 ```env
 # Format: "provider_id:Display Name"
-PAYMENT_PROVIDERS="pp_paystack_siteA:Paystack,pp_system_default:Pay on Delivery"
+PAYMENT_PROVIDERS="pp_apple_4all_paystack:Paystack,pp_system_default:Pay on Delivery"
 ```
 
-In your FreshJS Storefront `.env` for Website B:
+In your FreshJS Storefront `.env` for Urban Device Care:
 ```env
-PAYMENT_PROVIDERS="pp_paystack_siteB:Paystack,pp_system_default:Pay on Delivery"
+PAYMENT_PROVIDERS="pp_urbandevicecare_paystack:Paystack,pp_system_default:Pay on Delivery"
 ```
 The storefront will automatically ignore the other region-wide providers and dynamically bind to the correct backend instance!
 
